@@ -113,6 +113,7 @@ class TomeView extends FileView {
 	selInputEl: HTMLTextAreaElement | null = null;
 	selMode: "note" | "dict" | null = null;
 	pendingSelection = "";
+	pendingChapter = "";
 	currentChapter = "";
 	locationsReady = false;
 
@@ -215,6 +216,14 @@ class TomeView extends FileView {
 		});
 
 		const keyHandler = (e: KeyboardEvent) => {
+			const target = e.target as HTMLElement | null;
+			if (
+				target &&
+				(target.tagName === "TEXTAREA" ||
+					target.tagName === "INPUT" ||
+					target.isContentEditable)
+			)
+				return; // печатаем в поле — страницы не трогаем
 			if (e.key === "ArrowLeft") void this.rendition?.prev();
 			if (e.key === "ArrowRight" || e.key === " ") void this.rendition?.next();
 		};
@@ -399,6 +408,7 @@ class TomeView extends FileView {
 
 	showSelection(text: string) {
 		this.pendingSelection = text;
+		this.pendingChapter = this.currentChapter; // глава на момент выделения
 		if (this.selectionTextEl) {
 			const short = text.length > 120 ? text.slice(0, 120) + "…" : text;
 			this.selectionTextEl.setText("«" + short + "»");
@@ -461,7 +471,7 @@ class TomeView extends FileView {
 			].join("\n");
 			note = await this.app.vault.create(notePath, initial);
 		}
-		const src = this.currentChapter ? `${this.currentChapter}` : "—";
+		const src = this.pendingChapter || this.currentChapter || "—";
 		const quote = this.pendingSelection
 			.split("\n")
 			.map((l) => "> " + l)

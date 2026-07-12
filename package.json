@@ -1,24 +1,29 @@
 {
-  "name": "tome-reader",
-  "version": "0.1.0",
-  "description": "A beautiful e-book reader plugin for Obsidian",
-  "main": "main.js",
-  "scripts": {
-    "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production",
-    "install-vault": "node install-vault.mjs"
-  },
-  "keywords": ["obsidian", "epub", "reader", "ebook"],
-  "author": "katrinasenpai",
-  "license": "MIT",
-  "devDependencies": {
-    "@types/node": "^20.11.0",
-    "builtin-modules": "^3.3.0",
-    "esbuild": "^0.21.5",
-    "obsidian": "^1.5.7",
-    "typescript": "^5.4.5"
-  },
-  "dependencies": {
-    "epubjs": "^0.3.93"
-  }
+	"name": "tome-reader",
+	"version": "0.2.0",
+	"description": "A beautiful e-book reader plugin for Obsidian",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "node esbuild.config.mjs production",
+		"install-vault": "node install-vault.mjs"
+	},
+	"keywords": [
+		"obsidian",
+		"epub",
+		"reader",
+		"ebook"
+	],
+	"author": "katrinasenpai",
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^20.11.0",
+		"builtin-modules": "^3.3.0",
+		"esbuild": "^0.21.5",
+		"obsidian": "^1.5.7",
+		"typescript": "^5.4.5"
+	},
+	"dependencies": {
+		"epubjs": "^0.3.93"
+	}
 }
