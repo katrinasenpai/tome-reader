@@ -492,7 +492,7 @@ class TomeView extends FileView {
 			return;
 		}
 		const word = this.pendingSelection.replace(/\s+/g, " ").trim();
-		const line = `- **${word}**:::${translation || "❓"} _(из: ${this.file.basename})_`;
+		const line = `- **${word}**:::${translation || "❓"}`;
 		await this.appendToFile(dict, line, "## 📥 Словарь");
 		new Notice(
 			"🈶 В словарь: " +
