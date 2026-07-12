@@ -1,0 +1,137 @@
+/* Tome — e-book reader for Obsidian */
+
+.tome-view {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 0 !important;
+	background: var(--tome-bg, var(--background-primary));
+}
+
+/* ── шапка ── */
+.tome-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 12px;
+	border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+	color: var(--tome-fg, var(--text-normal));
+	background: var(--tome-bg, var(--background-primary));
+	flex: 0 0 auto;
+	min-height: 36px;
+}
+
+.tome-toc-btn {
+	background: transparent;
+	border: none;
+	color: var(--tome-fg, var(--text-normal));
+	font-size: 18px;
+	cursor: pointer;
+	padding: 2px 8px;
+	border-radius: 6px;
+}
+
+.tome-toc-btn:hover {
+	background: rgba(128, 128, 128, 0.15);
+}
+
+.tome-title {
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 40%;
+}
+
+.tome-chapter {
+	flex: 1;
+	text-align: center;
+	font-size: 12px;
+	opacity: 0.7;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tome-progress {
+	font-variant-numeric: tabular-nums;
+	font-size: 12px;
+	opacity: 0.8;
+	min-width: 38px;
+	text-align: right;
+}
+
+/* ── область чтения ── */
+.tome-reader-wrap {
+	position: relative;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.tome-reader {
+	position: absolute;
+	inset: 0;
+}
+
+.tome-reader iframe {
+	border: none;
+}
+
+/* ── зоны перелистывания ── */
+.tome-nav {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 18%;
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+	z-index: 5;
+	color: var(--tome-fg, var(--text-normal));
+	-webkit-tap-highlight-color: transparent;
+}
+
+.tome-nav span {
+	font-size: 34px;
+	opacity: 0;
+	transition: opacity 0.15s ease;
+	padding: 0 10px;
+	user-select: none;
+}
+
+.tome-nav:hover span {
+	opacity: 0.45;
+}
+
+.tome-nav:active span {
+	opacity: 0.7;
+}
+
+.tome-nav-prev {
+	left: 0;
+	justify-content: flex-start;
+}
+
+.tome-nav-next {
+	right: 0;
+	justify-content: flex-end;
+}
+
+/* планшет/телефон: зоны чуть шире, стрелки не мозолят глаза */
+.is-mobile .tome-nav {
+	width: 22%;
+}
+
+/* ── тема Серый Туман: лёгкая виньетка по краям ── */
+.tome-view[data-tome-theme="gray-fog"] .tome-reader-wrap::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	box-shadow: inset 0 0 90px rgba(0, 0, 0, 0.45);
+	z-index: 4;
+}
+
+.tome-view[data-tome-theme="gray-fog"] .tome-header {
+	border-bottom-color: rgba(192, 57, 43, 0.35);
+}
