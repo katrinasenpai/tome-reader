@@ -108,6 +108,10 @@ class TomeView extends FileView {
 	aaPanel: HTMLElement | null = null;
 	selectionBar: HTMLElement | null = null;
 	selectionTextEl: HTMLElement | null = null;
+	selActionsEl: HTMLElement | null = null;
+	selInputWrapEl: HTMLElement | null = null;
+	selInputEl: HTMLTextAreaElement | null = null;
+	selMode: "note" | "dict" | null = null;
 	pendingSelection = "";
 	currentChapter = "";
 	locationsReady = false;
@@ -336,13 +340,61 @@ class TomeView extends FileView {
 		bar.hide();
 		this.selectionBar = bar;
 		this.selectionTextEl = bar.createDiv({ cls: "tome-selection-text" });
+
+		// этап 1 — выбор действия
 		const actions = bar.createDiv({ cls: "tome-selection-actions" });
+		this.selActionsEl = actions;
 		const noteBtn = actions.createEl("button", { cls: "tome-btn", text: "📝 В конспект" });
 		const dictBtn = actions.createEl("button", { cls: "tome-btn", text: "🈶 В словарь" });
 		const closeBtn = actions.createEl("button", { cls: "tome-btn", text: "✕" });
-		noteBtn.onclick = () => void this.addSelectionToNote();
-		dictBtn.onclick = () => void this.addSelectionToDict();
+		noteBtn.onclick = () => this.openInputStage("note");
+		dictBtn.onclick = () => this.openInputStage("dict");
 		closeBtn.onclick = () => this.hideSelection();
+
+		// этап 2 — поле для мысли/перевода
+		const inputWrap = bar.createDiv({ cls: "tome-selection-input" });
+		inputWrap.hide();
+		this.selInputWrapEl = inputWrap;
+		const input = inputWrap.createEl("textarea", { cls: "tome-input" });
+		input.rows = 2;
+		this.selInputEl = input;
+		const inputActions = inputWrap.createDiv({ cls: "tome-selection-actions" });
+		const saveBtn = inputActions.createEl("button", { cls: "tome-btn tome-btn-accent", text: "💾 Сохранить" });
+		const backBtn = inputActions.createEl("button", { cls: "tome-btn", text: "↩ Назад" });
+		saveBtn.onclick = () => void this.saveFromInput();
+		backBtn.onclick = () => this.showActionsStage();
+		input.onkeydown = (e) => {
+			if (e.key === "Enter" && !e.shiftKey) {
+				e.preventDefault();
+				void this.saveFromInput();
+			}
+			if (e.key === "Escape") this.showActionsStage();
+		};
+	}
+
+	openInputStage(mode: "note" | "dict") {
+		this.selMode = mode;
+		if (!this.selInputEl || !this.selInputWrapEl || !this.selActionsEl) return;
+		this.selInputEl.value = "";
+		this.selInputEl.placeholder =
+			mode === "note"
+				? "Твоя мысль к цитате (можно оставить пустым) · Enter — сохранить"
+				: "Перевод или комментарий (пусто = ❓) · Enter — сохранить";
+		this.selActionsEl.hide();
+		this.selInputWrapEl.show();
+		this.selInputEl.focus();
+	}
+
+	showActionsStage() {
+		this.selMode = null;
+		this.selInputWrapEl?.hide();
+		this.selActionsEl?.show();
+	}
+
+	async saveFromInput() {
+		const extra = (this.selInputEl?.value ?? "").trim();
+		if (this.selMode === "note") await this.addSelectionToNote(extra);
+		else if (this.selMode === "dict") await this.addSelectionToDict(extra);
 	}
 
 	showSelection(text: string) {
@@ -351,11 +403,13 @@ class TomeView extends FileView {
 			const short = text.length > 120 ? text.slice(0, 120) + "…" : text;
 			this.selectionTextEl.setText("«" + short + "»");
 		}
+		this.showActionsStage();
 		this.selectionBar?.show();
 	}
 
 	hideSelection() {
 		this.pendingSelection = "";
+		this.selMode = null;
 		this.selectionBar?.hide();
 	}
 
@@ -385,7 +439,7 @@ class TomeView extends FileView {
 		await this.app.vault.modify(file, content);
 	}
 
-	async addSelectionToNote() {
+	async addSelectionToNote(comment: string) {
 		if (!this.pendingSelection || !this.file) return;
 		const s = this.plugin.settings;
 		await this.ensureFolder(s.noteFolder);
@@ -412,13 +466,14 @@ class TomeView extends FileView {
 			.split("\n")
 			.map((l) => "> " + l)
 			.join("\n");
-		const block = `${quote}\n> — *${src}*`;
+		let block = `${quote}\n> — *${src}*`;
+		if (comment) block += `\n\n💭 *${comment}*`;
 		await this.appendToFile(note, block, "## 🔖 Выделения");
-		new Notice("📝 Добавлено в конспект: " + this.file.basename);
+		new Notice("📝 В конспект" + (comment ? " (с мыслью)" : "") + ": " + this.file.basename);
 		this.hideSelection();
 	}
 
-	async addSelectionToDict() {
+	async addSelectionToDict(translation: string) {
 		if (!this.pendingSelection || !this.file) return;
 		const s = this.plugin.settings;
 		const dict = this.app.vault.getAbstractFileByPath(normalizePath(s.dictFile)) as TFile | null;
@@ -427,9 +482,13 @@ class TomeView extends FileView {
 			return;
 		}
 		const word = this.pendingSelection.replace(/\s+/g, " ").trim();
-		const line = `- **${word}**:::❓ _(из: ${this.file.basename})_`;
+		const line = `- **${word}**:::${translation || "❓"} _(из: ${this.file.basename})_`;
 		await this.appendToFile(dict, line, "## 📥 Словарь");
-		new Notice("🈶 В словарь: " + (word.length > 30 ? word.slice(0, 30) + "…" : word) + " — впиши перевод вместо ❓");
+		new Notice(
+			"🈶 В словарь: " +
+				(word.length > 30 ? word.slice(0, 30) + "…" : word) +
+				(translation ? " → " + translation : " — впиши перевод вместо ❓ позже")
+		);
 		this.hideSelection();
 	}
 
