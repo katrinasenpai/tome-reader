@@ -18,40 +18,128 @@ const VIEW_TYPE_EPUB = "tome-epub-view";
 
 type TomeTheme = "classic-light" | "classic-dark" | "parchment" | "gray-fog";
 
+type Lang = "en" | "ru";
+
 interface TomeSettings {
+	language: Lang;
 	theme: TomeTheme;
 	fontSize: number;
 	fontFamily: string;
 	lineHeight: number;
-	customTextColor: string; // "" = цвет темы
+	customTextColor: string; // "" = theme color
 	noteFolder: string;
 	dictFile: string;
 	locations: Record<string, string>;
 }
 
 const DEFAULT_SETTINGS: TomeSettings = {
+	language: "en",
 	theme: "classic-light",
 	fontSize: 18,
 	fontFamily: "",
 	lineHeight: 1.6,
 	customTextColor: "",
-	noteFolder: "📚 Книги/📓 Конспекты",
-	dictFile: "🈶 Лингва/🇬🇧 Английский.md",
+	noteFolder: "Books/Notes",
+	dictFile: "",
 	locations: {},
 };
 
 interface ThemeSpec {
-	label: string;
 	background: string;
 	color: string;
 	accent: string;
 }
 
 const THEMES: Record<TomeTheme, ThemeSpec> = {
-	"classic-light": { label: "Светлая", background: "#faf6ee", color: "#2e2a24", accent: "#8a6d3b" },
-	"classic-dark": { label: "Тёмная", background: "#1e1f22", color: "#cfd2d6", accent: "#b08d57" },
-	parchment: { label: "Пергамент", background: "#f0e0bd", color: "#4a3423", accent: "#8b5a2b" },
-	"gray-fog": { label: "Серый Туман", background: "#14151a", color: "#b9bcc7", accent: "#c0392b" },
+	"classic-light": { background: "#faf6ee", color: "#2e2a24", accent: "#8a6d3b" },
+	"classic-dark": { background: "#1e1f22", color: "#cfd2d6", accent: "#b08d57" },
+	parchment: { background: "#f0e0bd", color: "#4a3423", accent: "#8b5a2b" },
+	"gray-fog": { background: "#14151a", color: "#b9bcc7", accent: "#c0392b" },
+};
+
+const STRINGS: Record<Lang, any> = {
+	en: {
+		themes: {
+			"classic-light": "Classic Light",
+			"classic-dark": "Classic Dark",
+			parchment: "Parchment",
+			"gray-fog": "Gray Fog",
+		},
+		toc: "Table of contents",
+		aaTitle: "Appearance",
+		aaSize: "Size",
+		aaSpacing: "Spacing",
+		aaTextColor: "Text color",
+		aaReset: "Reset",
+		toNote: "📝 To book note",
+		toDict: "🈶 To dictionary",
+		save: "💾 Save",
+		back: "↩ Back",
+		phNote: "Your thought about this quote (optional) · Enter to save",
+		phDict: "Translation or comment (empty = ❓) · Enter to save",
+		extTaken: "Tome: the .epub extension is already handled by another plugin. Disable it and restart Obsidian.",
+		readFail: "Failed to read the file: ",
+		openFail: "Tome could not open this book: ",
+		dictMissing: (p: string) => "Tome: dictionary file not found: " + p + " (set it in Tome settings)",
+		nAddedNote: (b: string, c: boolean) => "📝 Added to book note" + (c ? " (with your thought)" : "") + ": " + b,
+		nAddedDict: (w: string, tr: string) => "🈶 To dictionary: " + w + (tr ? " → " + tr : " — fill in the translation (❓) later"),
+		noteIntro: (b: string) => `*Book note: ${b} (created by Tome).*`,
+		noteHeading: "## 🔖 Highlights",
+		stLanguage: "Language",
+		stLanguageDesc: "Plugin interface language (reopen the book to apply)",
+		stTheme: "Theme",
+		stThemeDesc: "Book page appearance (also available in the Aa panel while reading)",
+		stFontSize: "Font size",
+		stLineHeight: "Line spacing",
+		stFont: "Font",
+		stFontDesc: "Font family (empty = book default). E.g.: Georgia, Noto Serif",
+		stFontPh: "default",
+		stNoteFolder: "Book notes folder",
+		stNoteFolderDesc: "Where quote notes are created (selection → “To book note”)",
+		stDictFile: "Dictionary file",
+		stDictFileDesc: "Where selected words are added (selection → “To dictionary”)",
+	},
+	ru: {
+		themes: {
+			"classic-light": "Светлая",
+			"classic-dark": "Тёмная",
+			parchment: "Пергамент",
+			"gray-fog": "Серый Туман",
+		},
+		toc: "Оглавление",
+		aaTitle: "Оформление",
+		aaSize: "Размер",
+		aaSpacing: "Интервал",
+		aaTextColor: "Цвет текста",
+		aaReset: "Сброс",
+		toNote: "📝 В конспект",
+		toDict: "🈶 В словарь",
+		save: "💾 Сохранить",
+		back: "↩ Назад",
+		phNote: "Твоя мысль к цитате (можно оставить пустым) · Enter — сохранить",
+		phDict: "Перевод или комментарий (пусто = ❓) · Enter — сохранить",
+		extTaken: "Tome: расширение .epub уже занято другим плагином. Отключи его и перезапусти Obsidian.",
+		readFail: "Не удалось прочитать файл: ",
+		openFail: "Tome не смог открыть эту книгу: ",
+		dictMissing: (p: string) => "Tome: файл словаря не найден: " + p + " (укажи в настройках Tome)",
+		nAddedNote: (b: string, c: boolean) => "📝 В конспект" + (c ? " (с мыслью)" : "") + ": " + b,
+		nAddedDict: (w: string, tr: string) => "🈶 В словарь: " + w + (tr ? " → " + tr : " — впиши перевод вместо ❓ позже"),
+		noteIntro: (b: string) => `*Конспект: ${b} (создан из Tome).*`,
+		noteHeading: "## 🔖 Выделения",
+		stLanguage: "Язык",
+		stLanguageDesc: "Язык интерфейса плагина (переоткрой книгу, чтобы применить)",
+		stTheme: "Тема",
+		stThemeDesc: "Оформление страницы книги (доступно и в панели Aa при чтении)",
+		stFontSize: "Размер шрифта",
+		stLineHeight: "Межстрочный интервал",
+		stFont: "Шрифт",
+		stFontDesc: "Название шрифта (пусто = шрифт книги). Например: Georgia, Noto Serif",
+		stFontPh: "по умолчанию",
+		stNoteFolder: "Папка конспектов",
+		stNoteFolderDesc: "Куда складывать заметки-конспекты (выделение → «В конспект»)",
+		stDictFile: "Файл словаря",
+		stDictFileDesc: "Куда добавлять выделенные слова (выделение → «В словарь»)",
+	},
 };
 
 export default class TomePlugin extends Plugin {
@@ -65,9 +153,7 @@ export default class TomePlugin extends Plugin {
 		try {
 			this.registerExtensions(["epub"], VIEW_TYPE_EPUB);
 		} catch (e) {
-			new Notice(
-				"Tome: расширение .epub уже занято другим плагином. Отключи другой EPUB-плагин и перезапусти Obsidian."
-			);
+			new Notice(this.t().extTaken);
 		}
 
 		this.addSettingTab(new TomeSettingTab(this.app, this));
@@ -90,6 +176,10 @@ export default class TomePlugin extends Plugin {
 		1000,
 		true
 	);
+
+	t(): any {
+		return STRINGS[this.settings.language] ?? STRINGS.en;
+	}
 
 	applySettingsToOpenViews() {
 		this.app.workspace.getLeavesOfType(VIEW_TYPE_EPUB).forEach((leaf) => {
@@ -143,14 +233,15 @@ class TomeView extends FileView {
 		container.addClass("tome-view");
 
 		// ── шапка ──
+		const L = this.plugin.t();
 		const header = container.createDiv({ cls: "tome-header" });
 		const tocBtn = header.createEl("button", { cls: "tome-btn", text: "☰" });
-		tocBtn.setAttr("aria-label", "Оглавление");
+		tocBtn.setAttr("aria-label", L.toc);
 		header.createDiv({ cls: "tome-title", text: file.basename });
 		this.chapterEl = header.createDiv({ cls: "tome-chapter", text: "" });
 		this.progressEl = header.createDiv({ cls: "tome-progress", text: "…" });
 		const aaBtn = header.createEl("button", { cls: "tome-btn tome-aa-btn", text: "Aa" });
-		aaBtn.setAttr("aria-label", "Оформление");
+		aaBtn.setAttr("aria-label", L.aaTitle);
 
 		// ── область чтения ──
 		const readerWrap = container.createDiv({ cls: "tome-reader-wrap" });
@@ -171,7 +262,7 @@ class TomeView extends FileView {
 		try {
 			data = await this.app.vault.readBinary(file);
 		} catch (e) {
-			readerEl.setText("Не удалось прочитать файл: " + String(e));
+			readerEl.setText(L.readFail + String(e));
 			return;
 		}
 
@@ -185,7 +276,7 @@ class TomeView extends FileView {
 				allowScriptedContent: false,
 			});
 		} catch (e) {
-			readerEl.setText("Tome не смог открыть эту книгу: " + String(e));
+			readerEl.setText(L.openFail + String(e));
 			return;
 		}
 
@@ -252,13 +343,15 @@ class TomeView extends FileView {
 		panel.hide();
 		this.aaPanel = panel;
 
+		const L = this.plugin.t();
+
 		// темы
 		const themesRow = panel.createDiv({ cls: "tome-aa-row" });
 		(Object.keys(THEMES) as TomeTheme[]).forEach((key) => {
-			const t = THEMES[key];
-			const chip = themesRow.createEl("button", { cls: "tome-theme-chip", text: t.label });
-			chip.style.setProperty("--chip-bg", t.background);
-			chip.style.setProperty("--chip-fg", t.color);
+			const spec = THEMES[key];
+			const chip = themesRow.createEl("button", { cls: "tome-theme-chip", text: L.themes[key] });
+			chip.style.setProperty("--chip-bg", spec.background);
+			chip.style.setProperty("--chip-fg", spec.color);
 			chip.onclick = async () => {
 				this.plugin.settings.theme = key;
 				this.plugin.settings.customTextColor = "";
@@ -270,7 +363,7 @@ class TomeView extends FileView {
 
 		// размер шрифта
 		const sizeRow = panel.createDiv({ cls: "tome-aa-row" });
-		sizeRow.createSpan({ cls: "tome-aa-label", text: "Размер" });
+		sizeRow.createSpan({ cls: "tome-aa-label", text: L.aaSize });
 		const sizeMinus = sizeRow.createEl("button", { cls: "tome-btn", text: "−" });
 		const sizeVal = sizeRow.createSpan({ cls: "tome-aa-value", text: String(this.plugin.settings.fontSize) });
 		const sizePlus = sizeRow.createEl("button", { cls: "tome-btn", text: "+" });
@@ -289,7 +382,7 @@ class TomeView extends FileView {
 
 		// межстрочный интервал
 		const lhRow = panel.createDiv({ cls: "tome-aa-row" });
-		lhRow.createSpan({ cls: "tome-aa-label", text: "Интервал" });
+		lhRow.createSpan({ cls: "tome-aa-label", text: L.aaSpacing });
 		const lhMinus = lhRow.createEl("button", { cls: "tome-btn", text: "−" });
 		const lhVal = lhRow.createSpan({ cls: "tome-aa-value", text: this.plugin.settings.lineHeight.toFixed(1) });
 		const lhPlus = lhRow.createEl("button", { cls: "tome-btn", text: "+" });
@@ -308,7 +401,7 @@ class TomeView extends FileView {
 
 		// цвет текста
 		const colorRow = panel.createDiv({ cls: "tome-aa-row" });
-		colorRow.createSpan({ cls: "tome-aa-label", text: "Цвет текста" });
+		colorRow.createSpan({ cls: "tome-aa-label", text: L.aaTextColor });
 		const colorInput = colorRow.createEl("input", { cls: "tome-color-input" });
 		colorInput.type = "color";
 		colorInput.value = this.plugin.settings.customTextColor || THEMES[this.plugin.settings.theme].color;
@@ -317,7 +410,7 @@ class TomeView extends FileView {
 			await this.plugin.saveSettings();
 			this.plugin.applySettingsToOpenViews();
 		};
-		const colorReset = colorRow.createEl("button", { cls: "tome-btn", text: "Сброс" });
+		const colorReset = colorRow.createEl("button", { cls: "tome-btn", text: L.aaReset });
 		colorReset.onclick = async () => {
 			this.plugin.settings.customTextColor = "";
 			colorInput.value = THEMES[this.plugin.settings.theme].color;
@@ -351,10 +444,11 @@ class TomeView extends FileView {
 		this.selectionTextEl = bar.createDiv({ cls: "tome-selection-text" });
 
 		// этап 1 — выбор действия
+		const L = this.plugin.t();
 		const actions = bar.createDiv({ cls: "tome-selection-actions" });
 		this.selActionsEl = actions;
-		const noteBtn = actions.createEl("button", { cls: "tome-btn", text: "📝 В конспект" });
-		const dictBtn = actions.createEl("button", { cls: "tome-btn", text: "🈶 В словарь" });
+		const noteBtn = actions.createEl("button", { cls: "tome-btn", text: L.toNote });
+		const dictBtn = actions.createEl("button", { cls: "tome-btn", text: L.toDict });
 		const closeBtn = actions.createEl("button", { cls: "tome-btn", text: "✕" });
 		noteBtn.onclick = () => this.openInputStage("note");
 		dictBtn.onclick = () => this.openInputStage("dict");
@@ -368,8 +462,8 @@ class TomeView extends FileView {
 		input.rows = 2;
 		this.selInputEl = input;
 		const inputActions = inputWrap.createDiv({ cls: "tome-selection-actions" });
-		const saveBtn = inputActions.createEl("button", { cls: "tome-btn tome-btn-accent", text: "💾 Сохранить" });
-		const backBtn = inputActions.createEl("button", { cls: "tome-btn", text: "↩ Назад" });
+		const saveBtn = inputActions.createEl("button", { cls: "tome-btn tome-btn-accent", text: L.save });
+		const backBtn = inputActions.createEl("button", { cls: "tome-btn", text: L.back });
 		saveBtn.onclick = () => void this.saveFromInput();
 		backBtn.onclick = () => this.showActionsStage();
 		input.onkeydown = (e) => {
@@ -384,11 +478,9 @@ class TomeView extends FileView {
 	openInputStage(mode: "note" | "dict") {
 		this.selMode = mode;
 		if (!this.selInputEl || !this.selInputWrapEl || !this.selActionsEl) return;
+		const L = this.plugin.t();
 		this.selInputEl.value = "";
-		this.selInputEl.placeholder =
-			mode === "note"
-				? "Твоя мысль к цитате (можно оставить пустым) · Enter — сохранить"
-				: "Перевод или комментарий (пусто = ❓) · Enter — сохранить";
+		this.selInputEl.placeholder = mode === "note" ? L.phNote : L.phDict;
 		this.selActionsEl.hide();
 		this.selInputWrapEl.show();
 		this.selInputEl.focus();
@@ -454,6 +546,7 @@ class TomeView extends FileView {
 		const s = this.plugin.settings;
 		await this.ensureFolder(s.noteFolder);
 		const notePath = normalizePath(`${s.noteFolder}/${this.file.basename}.md`);
+		const L = this.plugin.t();
 		let note = this.app.vault.getAbstractFileByPath(notePath) as TFile | null;
 		if (!note) {
 			const initial = [
@@ -464,9 +557,9 @@ class TomeView extends FileView {
 				"  - book",
 				"---",
 				"",
-				`*Конспект: ${this.file.basename} (создан из Tome).*`,
+				L.noteIntro(this.file.basename),
 				"",
-				"## 🔖 Выделения",
+				L.noteHeading,
 				"",
 			].join("\n");
 			note = await this.app.vault.create(notePath, initial);
@@ -478,27 +571,26 @@ class TomeView extends FileView {
 			.join("\n");
 		let block = `${quote}\n> — *${src}*`;
 		if (comment) block += `\n\n💭 *${comment}*`;
-		await this.appendToFile(note, block, "## 🔖 Выделения");
-		new Notice("📝 В конспект" + (comment ? " (с мыслью)" : "") + ": " + this.file.basename);
+		await this.appendToFile(note, block, L.noteHeading);
+		new Notice(L.nAddedNote(this.file.basename, Boolean(comment)));
 		this.hideSelection();
 	}
 
 	async addSelectionToDict(translation: string) {
 		if (!this.pendingSelection || !this.file) return;
 		const s = this.plugin.settings;
-		const dict = this.app.vault.getAbstractFileByPath(normalizePath(s.dictFile)) as TFile | null;
+		const L = this.plugin.t();
+		const dict = s.dictFile
+			? (this.app.vault.getAbstractFileByPath(normalizePath(s.dictFile)) as TFile | null)
+			: null;
 		if (!dict) {
-			new Notice("Tome: файл словаря не найден: " + s.dictFile + " (настройки Tome)");
+			new Notice(L.dictMissing(s.dictFile || "—"));
 			return;
 		}
 		const word = this.pendingSelection.replace(/\s+/g, " ").trim();
 		const line = `- **${word}**:::${translation || "❓"}`;
 		await this.appendToFile(dict, line, "## 📥 Словарь");
-		new Notice(
-			"🈶 В словарь: " +
-				(word.length > 30 ? word.slice(0, 30) + "…" : word) +
-				(translation ? " → " + translation : " — впиши перевод вместо ❓ позже")
-		);
+		new Notice(L.nAddedDict(word.length > 30 ? word.slice(0, 30) + "…" : word, translation));
 		this.hideSelection();
 	}
 
@@ -616,13 +708,29 @@ class TomeSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+		const L = this.plugin.t();
 
 		new Setting(containerEl)
-			.setName("Тема")
-			.setDesc("Оформление страницы книги (доступно и в панели Aa при чтении)")
+			.setName(L.stLanguage)
+			.setDesc(L.stLanguageDesc)
+			.addDropdown((dd) =>
+				dd
+					.addOption("en", "English")
+					.addOption("ru", "Русский")
+					.setValue(this.plugin.settings.language)
+					.onChange(async (v) => {
+						this.plugin.settings.language = v as Lang;
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName(L.stTheme)
+			.setDesc(L.stThemeDesc)
 			.addDropdown((dd) => {
 				(Object.keys(THEMES) as TomeTheme[]).forEach((key) =>
-					dd.addOption(key, THEMES[key].label)
+					dd.addOption(key, L.themes[key])
 				);
 				dd.setValue(this.plugin.settings.theme).onChange(async (v) => {
 					this.plugin.settings.theme = v as TomeTheme;
@@ -632,7 +740,7 @@ class TomeSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName("Размер шрифта")
+			.setName(L.stFontSize)
 			.addSlider((sl) =>
 				sl
 					.setLimits(12, 36, 1)
@@ -646,7 +754,7 @@ class TomeSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Межстрочный интервал")
+			.setName(L.stLineHeight)
 			.addSlider((sl) =>
 				sl
 					.setLimits(1.1, 2.4, 0.1)
@@ -660,11 +768,11 @@ class TomeSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Шрифт")
-			.setDesc("Название шрифта (пусто = шрифт книги). Например: Georgia, Noto Serif")
+			.setName(L.stFont)
+			.setDesc(L.stFontDesc)
 			.addText((tx) =>
 				tx
-					.setPlaceholder("по умолчанию")
+					.setPlaceholder(L.stFontPh)
 					.setValue(this.plugin.settings.fontFamily)
 					.onChange(async (v) => {
 						this.plugin.settings.fontFamily = v;
@@ -674,8 +782,8 @@ class TomeSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Папка конспектов")
-			.setDesc("Куда складывать заметки-конспекты книг (выделение → «В конспект»)")
+			.setName(L.stNoteFolder)
+			.setDesc(L.stNoteFolderDesc)
 			.addText((tx) =>
 				tx
 					.setValue(this.plugin.settings.noteFolder)
@@ -686,13 +794,13 @@ class TomeSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Файл словаря")
-			.setDesc("Куда добавлять слова (выделение → «В словарь»). Строка попадает под заголовок «## 📥 Словарь»")
+			.setName(L.stDictFile)
+			.setDesc(L.stDictFileDesc)
 			.addText((tx) =>
 				tx
 					.setValue(this.plugin.settings.dictFile)
 					.onChange(async (v) => {
-						this.plugin.settings.dictFile = v.trim() || DEFAULT_SETTINGS.dictFile;
+						this.plugin.settings.dictFile = v.trim();
 						await this.plugin.saveSettings();
 					})
 			);

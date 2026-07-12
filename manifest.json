@@ -1,7 +1,7 @@
 {
 	"id": "tome-reader",
 	"name": "Tome",
-	"version": "0.2.1",
+	"version": "0.3.0",
 	"minAppVersion": "1.5.0",
 	"description": "A beautiful e-book reader. EPUB with themes, custom typography and reading progress — on desktop and mobile.",
 	"author": "katrinasenpai",
