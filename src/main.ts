@@ -10,14 +10,23 @@ import {
 	WorkspaceLeaf,
 	debounce,
 	normalizePath,
+	requestUrl,
 } from "obsidian";
-import ePub, { Book, Rendition } from "epubjs";
+import ePub, { Book, EpubCFI, Rendition } from "epubjs";
 
 const VIEW_TYPE_EPUB = "tome-epub-view";
 
 type TomeTheme = "classic-light" | "classic-dark" | "parchment" | "gray-fog";
 
 type Lang = "en" | "ru";
+
+interface TocEntry {
+	label: string;
+	href: string;
+	depth: number;
+	cfi?: string; // построенные по заголовкам записи целятся точным CFI
+	idx?: number; // индекс файла в спайне — для подсветки текущей главы
+}
 
 interface TomeSettings {
 	language: Lang;
@@ -30,6 +39,11 @@ interface TomeSettings {
 	dictFiles: string[];
 	lastDict: string;
 	locations: Record<string, string>;
+	genTocs: Record<string, TocEntry[]>; // кэш оглавлений, собранных по заголовкам
+	aiPreset: string; // "" = выключен
+	aiBaseUrl: string;
+	aiModel: string;
+	aiKey: string;
 }
 
 const DEFAULT_SETTINGS: TomeSettings = {
@@ -43,6 +57,19 @@ const DEFAULT_SETTINGS: TomeSettings = {
 	dictFiles: [],
 	lastDict: "",
 	locations: {},
+	genTocs: {},
+	aiPreset: "",
+	aiBaseUrl: "",
+	aiModel: "",
+	aiKey: "",
+};
+
+const AI_PRESETS: Record<string, { url: string; model: string }> = {
+	groq: { url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+	openai: { url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+	openrouter: { url: "https://openrouter.ai/api/v1", model: "" },
+	anthropic: { url: "https://api.anthropic.com", model: "claude-opus-4-8" },
+	custom: { url: "", model: "" },
 };
 
 interface ThemeSpec {
@@ -104,6 +131,29 @@ const STRINGS: Record<Lang, any> = {
 		dictTo: "To:",
 		dictNone: "Tome: no dictionaries configured — add one in Tome settings",
 		tocFail: "Tome: could not open this chapter",
+		tocBuilt: (n: number) => `Tome: table of contents built from headings (${n} chapters)`,
+		aiBtn: "✨ AI",
+		aiTranslate: "🌐 Translate",
+		aiExplain: "💡 Explain",
+		aiRecap: "📍 What happened so far?",
+		phAsk: "Or ask your own question · Enter",
+		aiThinking: "Thinking…",
+		aiReading: "Re-reading the book…",
+		aiNoText: "Tome: could not collect the text before your position",
+		aiNoKey: "Tome: AI is not set up — pick a provider and add an API key in Tome settings",
+		aiRefusal: "the model declined to answer",
+		aiEmpty: "empty response from the model",
+		stAi: "AI assistant",
+		stAiDesc:
+			"Bring your own API key. Selected fragments (and, for book questions, text you've already read) are sent to the provider you choose",
+		stAiOff: "Off",
+		stAiCustom: "Custom (OpenAI-compatible)",
+		stAiPreset: "Provider",
+		stAiUrl: "Base URL",
+		stAiModel: "Model",
+		stAiModelDesc: "E.g. llama-3.3-70b-versatile · gpt-4o-mini · claude-opus-4-8 (claude-haiku-4-5 is the budget pick)",
+		stAiKey: "API key",
+		stAiKeyDesc: "Stored locally in the plugin data on this device",
 	},
 	ru: {
 		themes: {
@@ -150,6 +200,29 @@ const STRINGS: Record<Lang, any> = {
 		dictTo: "Куда:",
 		dictNone: "Tome: словари не настроены — добавь в настройках Tome",
 		tocFail: "Tome: не удалось открыть главу",
+		tocBuilt: (n: number) => `Tome: оглавление собрано по заголовкам (${n} глав)`,
+		aiBtn: "✨ AI",
+		aiTranslate: "🌐 Перевод",
+		aiExplain: "💡 Пояснить",
+		aiRecap: "📍 Что было раньше?",
+		phAsk: "Или свой вопрос · Enter — спросить",
+		aiThinking: "Думаю…",
+		aiReading: "Перечитываю книгу…",
+		aiNoText: "Tome: не удалось собрать текст до текущего места",
+		aiNoKey: "Tome: AI не настроен — выбери провайдера и добавь API-ключ в настройках Tome",
+		aiRefusal: "модель отказалась отвечать",
+		aiEmpty: "пустой ответ модели",
+		stAi: "AI-ассистент",
+		stAiDesc:
+			"Свой API-ключ. Выделенные фрагменты (а для вопросов по книге — уже прочитанный текст) отправляются выбранному провайдеру",
+		stAiOff: "Выключен",
+		stAiCustom: "Свой (OpenAI-совместимый)",
+		stAiPreset: "Провайдер",
+		stAiUrl: "Base URL",
+		stAiModel: "Модель",
+		stAiModelDesc: "Например: llama-3.3-70b-versatile · gpt-4o-mini · claude-opus-4-8 (эконом-вариант — claude-haiku-4-5)",
+		stAiKey: "API-ключ",
+		stAiKeyDesc: "Хранится локально в данных плагина на этом устройстве",
 	},
 };
 
@@ -175,6 +248,7 @@ export default class TomePlugin extends Plugin {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 		if (!this.settings.locations) this.settings.locations = {};
 		if (!Array.isArray(this.settings.dictFiles)) this.settings.dictFiles = [];
+		if (!this.settings.genTocs) this.settings.genTocs = {};
 		// миграция со старого одиночного поля dictFile
 		if (data.dictFile && this.settings.dictFiles.length === 0) {
 			this.settings.dictFiles = [data.dictFile];
@@ -196,6 +270,84 @@ export default class TomePlugin extends Plugin {
 
 	t(): any {
 		return STRINGS[this.settings.language] ?? STRINGS.en;
+	}
+
+	aiReady(): boolean {
+		const s = this.settings;
+		return Boolean(s.aiPreset && s.aiKey.trim() && s.aiModel.trim() && s.aiBaseUrl.trim());
+	}
+
+	// один вызов «system + user → текст ответа»; Anthropic говорит на своём
+	// диалекте Messages API, остальные провайдеры — на OpenAI-совместимом
+	async aiChat(system: string, user: string): Promise<string> {
+		const s = this.settings;
+		const L = this.t();
+		if (!this.aiReady()) throw new Error(L.aiNoKey);
+		const base = s.aiBaseUrl.trim().replace(/\/+$/, "");
+		const isAnthropic = s.aiPreset === "anthropic";
+		const url = isAnthropic ? base + "/v1/messages" : base + "/chat/completions";
+		const headers: Record<string, string> = { "Content-Type": "application/json" };
+		let body: any;
+		if (isAnthropic) {
+			headers["x-api-key"] = s.aiKey.trim();
+			headers["anthropic-version"] = "2023-06-01";
+			body = {
+				model: s.aiModel.trim(),
+				max_tokens: 1500,
+				system,
+				messages: [{ role: "user", content: user }],
+			};
+		} else {
+			headers["Authorization"] = "Bearer " + s.aiKey.trim();
+			body = {
+				model: s.aiModel.trim(),
+				max_tokens: 1500,
+				temperature: 0.3,
+				messages: [
+					{ role: "system", content: system },
+					{ role: "user", content: user },
+				],
+			};
+		}
+		const res = await requestUrl({
+			url,
+			method: "POST",
+			headers,
+			body: JSON.stringify(body),
+			throw: false,
+		});
+		if (res.status < 200 || res.status >= 300) {
+			let msg = "HTTP " + res.status;
+			try {
+				const j: any = res.json;
+				const detail = j?.error?.message ?? j?.error ?? "";
+				if (detail) msg += ": " + String(typeof detail === "string" ? detail : JSON.stringify(detail)).slice(0, 300);
+			} catch (e) {
+				if (res.text) msg += ": " + res.text.slice(0, 200);
+			}
+			throw new Error(msg);
+		}
+		let data: any;
+		try {
+			data = res.json;
+		} catch (e) {
+			throw new Error(L.aiEmpty);
+		}
+		let text = "";
+		if (isAnthropic) {
+			if (data?.stop_reason === "refusal") throw new Error(L.aiRefusal);
+			const blocks: any[] = Array.isArray(data?.content) ? data.content : [];
+			text = blocks
+				.filter((b) => b?.type === "text")
+				.map((b) => String(b.text ?? ""))
+				.join("\n");
+		} else {
+			text = String(data?.choices?.[0]?.message?.content ?? "");
+		}
+		// рассуждающие модели заворачивают мысли в <think> (в т.ч. без закрытия)
+		text = text.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/<think>[\s\S]*$/, "").trim();
+		if (!text) throw new Error(L.aiEmpty);
+		return text;
 	}
 
 	applySettingsToOpenViews() {
@@ -222,13 +374,24 @@ class TomeView extends FileView {
 	selDictRowEl: HTMLElement | null = null;
 	selDictPath = "";
 	pendingSelection = "";
+	pendingContext = "";
 	pendingChapter = "";
 	currentChapter = "";
 	locationsReady = false;
 	tocPanel: HTMLElement | null = null;
 	tocListEl: HTMLElement | null = null;
 	tocFilterEl: HTMLInputElement | null = null;
-	flatToc: { label: string; href: string; depth: number }[] = [];
+	flatToc: TocEntry[] = [];
+	flatTocGenerated = false;
+	selAiBtn: HTMLElement | null = null;
+	selAiWrapEl: HTMLElement | null = null;
+	selAiChipsEl: HTMLElement | null = null;
+	selAiInputEl: HTMLTextAreaElement | null = null;
+	selAiAnswerEl: HTMLElement | null = null;
+	selAiActionsEl: HTMLElement | null = null;
+	aiMode: "sel" | "book" = "sel";
+	aiAnswer = "";
+	aiBusy = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: TomePlugin) {
 		super(leaf);
@@ -263,6 +426,8 @@ class TomeView extends FileView {
 		header.createDiv({ cls: "tome-title", text: file.basename });
 		this.chapterEl = header.createDiv({ cls: "tome-chapter", text: "" });
 		this.progressEl = header.createDiv({ cls: "tome-progress", text: "…" });
+		const aiHeaderBtn = header.createEl("button", { cls: "tome-btn", text: "✨" });
+		aiHeaderBtn.setAttr("aria-label", L.aiBtn);
 		const aaBtn = header.createEl("button", { cls: "tome-btn tome-aa-btn", text: "Aa" });
 		aaBtn.setAttr("aria-label", L.aaTitle);
 
@@ -326,7 +491,19 @@ class TomeView extends FileView {
 			try {
 				const sel = contents?.window?.getSelection?.();
 				const text = sel ? String(sel.toString()).trim() : "";
-				if (text) this.showSelection(text);
+				let para = "";
+				try {
+					// абзац вокруг выделения — контекст для AI-перевода/пояснения
+					const node: any = sel?.anchorNode;
+					const el = node ? (node.nodeType === 3 ? node.parentElement : node) : null;
+					para = String(el?.closest?.("p, li, blockquote, div")?.textContent ?? "")
+						.replace(/\s+/g, " ")
+						.trim()
+						.slice(0, 600);
+				} catch (e) {
+					/* noop */
+				}
+				if (text) this.showSelection(text, para);
 			} catch (e) {
 				/* noop */
 			}
@@ -351,10 +528,12 @@ class TomeView extends FileView {
 		navNext.onclick = () => void this.rendition?.next();
 		tocBtn.onclick = () => this.toggleToc();
 		aaBtn.onclick = () => this.toggleAaPanel();
+		aiHeaderBtn.onclick = () => this.openBookAi();
 
 		this.flatToc = [];
+		this.flatTocGenerated = false;
 		void this.book.loaded.navigation
-			.then((nav: any) => {
+			.then(async (nav: any) => {
 				const walk = (items: any[], depth: number) => {
 					for (const it of items ?? []) {
 						this.flatToc.push({
@@ -366,6 +545,24 @@ class TomeView extends FileView {
 					}
 				};
 				walk(nav?.toc ?? [], 0);
+				// у конвертированных книг ncx часто пуст («Start») — собираем
+				// оглавление по заголовкам внутри текста
+				if (this.flatToc.length <= 2 && this.file) {
+					const cached = this.plugin.settings.genTocs[this.file.path];
+					if (cached?.length) {
+						this.flatToc = cached.slice();
+						this.flatTocGenerated = true;
+						return;
+					}
+					const entries = await this.generateTocFromHeadings();
+					if (entries.length > this.flatToc.length && this.file) {
+						this.flatToc = entries;
+						this.flatTocGenerated = true;
+						this.plugin.settings.genTocs[this.file.path] = entries;
+						await this.plugin.saveSettings();
+						new Notice(this.plugin.t().tocBuilt(entries.length));
+					}
+				}
 			})
 			.catch(() => {});
 
@@ -493,9 +690,12 @@ class TomeView extends FileView {
 		this.selActionsEl = actions;
 		const noteBtn = actions.createEl("button", { cls: "tome-btn", text: L.toNote });
 		const dictBtn = actions.createEl("button", { cls: "tome-btn", text: L.toDict });
+		const aiBtn = actions.createEl("button", { cls: "tome-btn", text: L.aiBtn });
+		this.selAiBtn = aiBtn;
 		const closeBtn = actions.createEl("button", { cls: "tome-btn", text: "✕" });
 		noteBtn.onclick = () => this.openInputStage("note");
 		dictBtn.onclick = () => this.openInputStage("dict");
+		aiBtn.onclick = () => this.openAiStage("sel");
 		closeBtn.onclick = () => this.hideSelection();
 
 		// этап 2 — поле для мысли/перевода
@@ -519,6 +719,242 @@ class TomeView extends FileView {
 			}
 			if (e.key === "Escape") this.showActionsStage();
 		};
+
+		// этап 3 — AI: быстрые действия, свой вопрос, ответ
+		const aiWrap = bar.createDiv({ cls: "tome-selection-input" });
+		aiWrap.hide();
+		this.selAiWrapEl = aiWrap;
+		this.selAiChipsEl = aiWrap.createDiv({ cls: "tome-dict-row" });
+		const aiInput = aiWrap.createEl("textarea", { cls: "tome-input" });
+		aiInput.rows = 1;
+		aiInput.placeholder = L.phAsk;
+		this.selAiInputEl = aiInput;
+		aiInput.onkeydown = (e) => {
+			if (e.key === "Enter" && !e.shiftKey) {
+				e.preventDefault();
+				if (this.aiMode === "book") void this.runBookAi("ask");
+				else void this.runAi("ask");
+			}
+			if (e.key === "Escape") this.closeAiStage();
+		};
+		const answer = aiWrap.createDiv({ cls: "tome-ai-answer" });
+		answer.hide();
+		this.selAiAnswerEl = answer;
+		const aiActions = aiWrap.createDiv({ cls: "tome-selection-actions" });
+		this.selAiActionsEl = aiActions;
+		const aiToDict = aiActions.createEl("button", { cls: "tome-btn tome-ai-todict", text: L.toDict });
+		const aiToNote = aiActions.createEl("button", { cls: "tome-btn tome-ai-tonote", text: L.toNote });
+		const aiBack = aiActions.createEl("button", { cls: "tome-btn", text: L.back });
+		// ответ AI подставляется в обычный этап словаря/конспекта — там можно
+		// поправить текст и выбрать словарь-цель
+		aiToDict.onclick = () => {
+			const ans = this.aiAnswer;
+			this.openInputStage("dict");
+			if (this.selInputEl) this.selInputEl.value = ans;
+		};
+		aiToNote.onclick = () => {
+			const ans = this.aiAnswer;
+			this.openInputStage("note");
+			if (this.selInputEl) this.selInputEl.value = ans;
+		};
+		aiBack.onclick = () => this.closeAiStage();
+	}
+
+	// ─────────────────── AI-ассистент ───────────────────
+
+	openAiStage(mode: "sel" | "book") {
+		const L = this.plugin.t();
+		if (!this.plugin.aiReady()) {
+			new Notice(L.aiNoKey);
+			return;
+		}
+		this.aiMode = mode;
+		this.aiAnswer = "";
+		this.setAiAnswer("");
+		if (!this.selAiWrapEl || !this.selAiChipsEl || !this.selAiInputEl) return;
+		this.selAiChipsEl.empty();
+		if (mode === "sel") {
+			const tr = this.selAiChipsEl.createEl("button", { cls: "tome-dict-chip", text: L.aiTranslate });
+			tr.onclick = () => void this.runAi("translate");
+			const ex = this.selAiChipsEl.createEl("button", { cls: "tome-dict-chip", text: L.aiExplain });
+			ex.onclick = () => void this.runAi("explain");
+		} else {
+			const rc = this.selAiChipsEl.createEl("button", { cls: "tome-dict-chip", text: L.aiRecap });
+			rc.onclick = () => void this.runBookAi("recap");
+		}
+		this.selAiInputEl.value = "";
+		this.selMode = null;
+		this.selActionsEl?.hide();
+		this.selInputWrapEl?.hide();
+		this.selAiWrapEl.show();
+	}
+
+	closeAiStage() {
+		if (this.aiMode === "book") {
+			this.hideSelection();
+			return;
+		}
+		this.selAiWrapEl?.hide();
+		this.selActionsEl?.show();
+	}
+
+	// вопросы по книге без выделения — из кнопки ✨ в шапке
+	openBookAi() {
+		const L = this.plugin.t();
+		if (!this.plugin.aiReady()) {
+			new Notice(L.aiNoKey);
+			return;
+		}
+		this.pendingSelection = "";
+		this.pendingContext = "";
+		if (this.selectionTextEl) {
+			const where = this.currentChapter ? " · " + this.currentChapter : "";
+			this.selectionTextEl.setText("✨ " + (this.file?.basename ?? "") + where);
+		}
+		this.hideToc();
+		this.aaPanel?.hide();
+		this.openAiStage("book");
+		this.selectionBar?.show();
+	}
+
+	setAiAnswer(text: string) {
+		const el = this.selAiAnswerEl;
+		if (!el) return;
+		el.setText(text);
+		el.toggle(Boolean(text));
+		const hasAnswer = Boolean(this.aiAnswer);
+		const canSave = hasAnswer && this.aiMode === "sel";
+		this.selAiActionsEl?.querySelector(".tome-ai-todict")?.toggleClass("tome-hidden", !canSave);
+		this.selAiActionsEl?.querySelector(".tome-ai-tonote")?.toggleClass("tome-hidden", !canSave);
+	}
+
+	async runAi(kind: "translate" | "explain" | "ask") {
+		if (this.aiBusy) return;
+		const L = this.plugin.t();
+		const sel = this.pendingSelection;
+		const para = this.pendingContext;
+		const book = this.file?.basename ?? "";
+		const lang = this.plugin.settings.language === "ru" ? "Russian" : "English";
+		let userMsg = "";
+		if (kind === "translate") {
+			userMsg =
+				`Translate into ${lang}: "${sel}"` +
+				(para && para !== sel ? `\nSentence context: "${para}"` : "") +
+				`\nReply with ONLY the translation; for a single word you may add the reading or a brief nuance in parentheses.`;
+		} else if (kind === "explain") {
+			userMsg =
+				`Explain the meaning of this fragment in its context (terms, idioms, cultural references, allusions): "${sel}"` +
+				(para && para !== sel ? `\nContext: "${para}"` : "") +
+				`\nAnswer in 2–5 sentences.`;
+		} else {
+			const q = (this.selAiInputEl?.value ?? "").trim();
+			if (!q) return;
+			userMsg = q + `\n\nAbout this fragment from the book: "${sel}"` + (para && para !== sel ? `\nContext: "${para}"` : "");
+		}
+		const system = `You are a reading assistant inside an e-book reader. The reader is reading "${book}". Answer in ${lang}. Be concise and helpful. Do not reveal plot events beyond the provided text.`;
+		await this.execAi(system, userMsg, L.aiThinking);
+	}
+
+	async runBookAi(kind: "recap" | "ask") {
+		if (this.aiBusy) return;
+		const L = this.plugin.t();
+		const q = kind === "ask" ? (this.selAiInputEl?.value ?? "").trim() : "";
+		if (kind === "ask" && !q) return;
+		this.aiBusy = true;
+		this.aiAnswer = "";
+		this.setAiAnswer("⏳ " + L.aiReading);
+		let excerpt = "";
+		try {
+			excerpt = await this.getTextBeforePosition(12000);
+		} catch (e) {
+			/* noop */
+		}
+		this.aiBusy = false;
+		if (!excerpt) {
+			this.setAiAnswer("");
+			new Notice(L.aiNoText);
+			return;
+		}
+		const book = this.file?.basename ?? "";
+		const chapter = this.currentChapter;
+		const lang = this.plugin.settings.language === "ru" ? "Russian" : "English";
+		const system =
+			`You are a reading assistant inside an e-book reader. The reader is reading "${book}"` +
+			(chapter ? `, currently at "${chapter}"` : "") +
+			`. Answer in ${lang}. Important: rely ONLY on the provided excerpt (text before the reader's current position); never reveal or guess anything beyond it.`;
+		const user =
+			kind === "recap"
+				? `Excerpt (the tail of what has been read so far):\n"""${excerpt}"""\n\nBriefly remind me what has been happening: key events and characters, 3–6 bullet points.`
+				: `Excerpt (the tail of what has been read so far):\n"""${excerpt}"""\n\nMy question: ${q}\nIf the excerpt is not enough to answer, say you can't tell yet without spoilers.`;
+		await this.execAi(system, user, L.aiThinking);
+	}
+
+	async execAi(system: string, user: string, waitText: string) {
+		if (this.aiBusy) return;
+		this.aiBusy = true;
+		this.aiAnswer = "";
+		this.setAiAnswer("⏳ " + waitText);
+		try {
+			const res = await this.plugin.aiChat(system, user);
+			this.aiAnswer = res;
+			this.setAiAnswer(res);
+		} catch (e) {
+			this.setAiAnswer("");
+			new Notice("Tome AI: " + String((e as Error)?.message ?? e));
+		} finally {
+			this.aiBusy = false;
+		}
+	}
+
+	// текст до текущей позиции читателя (без спойлеров) — контекст для AI
+	async getTextBeforePosition(maxChars: number): Promise<string> {
+		const loc = (this.rendition as any)?.currentLocation?.();
+		const startHref = String(loc?.start?.href ?? "");
+		const cfi = String(loc?.start?.cfi ?? "");
+		const spine: any = (this.book as any)?.spine;
+		const items: any[] = spine?.spineItems ?? [];
+		if (!items.length) return "";
+		let curIdx = items.findIndex((it) => this.samePath(String(it?.href ?? ""), startHref));
+		if (curIdx < 0) curIdx = 0;
+		let text = "";
+		// текущий файл — только до позиции чтения
+		try {
+			const contents: any[] = (this.rendition as any)?.getContents?.() ?? [];
+			for (const c of contents) {
+				const doc: Document | undefined = c?.document;
+				if (!doc?.body) continue;
+				let upTo = "";
+				try {
+					const range = c.range?.(cfi);
+					if (range) {
+						const r = doc.createRange();
+						r.setStart(doc.body, 0);
+						r.setEnd(range.startContainer, range.startOffset);
+						upTo = r.toString();
+					}
+				} catch (e) {
+					/* noop */
+				}
+				if (!upTo) upTo = String(doc.body.textContent ?? "");
+				text = upTo;
+				break;
+			}
+		} catch (e) {
+			/* noop */
+		}
+		// предыдущие файлы, пока не наберём maxChars
+		for (let i = curIdx - 1; i >= 0 && text.length < maxChars; i--) {
+			const sec = items[i];
+			try {
+				await sec.load((this.book as any).load.bind(this.book));
+				const t = String(sec.document?.body?.textContent ?? "");
+				sec.unload?.();
+				text = t + "\n" + text;
+			} catch (e) {
+				/* noop */
+			}
+		}
+		return text.replace(/\s+/g, " ").trim().slice(-maxChars);
 	}
 
 	openInputStage(mode: "note" | "dict") {
@@ -530,6 +966,7 @@ class TomeView extends FileView {
 		if (mode === "dict") this.renderDictChips();
 		else this.selDictRowEl?.hide();
 		this.selActionsEl.hide();
+		this.selAiWrapEl?.hide();
 		this.selInputWrapEl.show();
 		this.selInputEl.focus();
 	}
@@ -567,6 +1004,7 @@ class TomeView extends FileView {
 	showActionsStage() {
 		this.selMode = null;
 		this.selInputWrapEl?.hide();
+		this.selAiWrapEl?.hide();
 		this.selActionsEl?.show();
 	}
 
@@ -576,19 +1014,23 @@ class TomeView extends FileView {
 		else if (this.selMode === "dict") await this.addSelectionToDict(extra);
 	}
 
-	showSelection(text: string) {
+	showSelection(text: string, context = "") {
 		this.pendingSelection = text;
+		this.pendingContext = context;
 		this.pendingChapter = this.currentChapter; // глава на момент выделения
 		if (this.selectionTextEl) {
 			const short = text.length > 120 ? text.slice(0, 120) + "…" : text;
 			this.selectionTextEl.setText("«" + short + "»");
 		}
+		this.selAiBtn?.toggle(this.plugin.aiReady());
 		this.showActionsStage();
 		this.selectionBar?.show();
 	}
 
 	hideSelection() {
 		this.pendingSelection = "";
+		this.pendingContext = "";
+		this.aiAnswer = "";
 		this.selMode = null;
 		this.selectionBar?.hide();
 		// планшетное выделение может «увезти» колонку — возвращаем страницу на место
@@ -705,6 +1147,10 @@ class TomeView extends FileView {
 			} catch (e) {
 				label = "";
 			}
+			if (!label && this.flatTocGenerated) {
+				const gi = this.genTocCurrentIndex(href, String(location?.start?.cfi ?? ""));
+				if (gi >= 0) label = this.flatToc[gi].label;
+			}
 			if (!label) {
 				const hit = this.flatToc.find((en) => this.samePath(en.href.split("#")[0], href));
 				if (hit) label = hit.label;
@@ -780,19 +1226,143 @@ class TomeView extends FileView {
 		list.empty();
 		const loc = (this.rendition as any)?.currentLocation?.();
 		const curHref = String(loc?.start?.href ?? "");
+		const curCfi = String(loc?.start?.cfi ?? "");
+		const genCurrent = this.flatTocGenerated ? this.genTocCurrentIndex(curHref, curCfi) : -1;
 		let marked = false;
-		for (const entry of this.flatToc) {
+		this.flatToc.forEach((entry, i) => {
 			const row = list.createDiv({ cls: "tome-toc-item", text: entry.label || "—" });
 			row.setAttr("data-depth", String(entry.depth));
-			if (!marked && curHref && this.samePath(entry.href.split("#")[0], curHref)) {
+			const isCurrent = this.flatTocGenerated
+				? i === genCurrent
+				: !marked && Boolean(curHref) && this.samePath(entry.href.split("#")[0], curHref);
+			if (isCurrent) {
 				row.addClass("is-current");
 				marked = true;
 			}
 			row.onclick = () => {
 				this.hideToc();
-				void this.displayHref(entry.href, entry.label);
+				void this.displayEntry(entry);
 			};
+		});
+	}
+
+	// запись из собранного оглавления открываем по её CFI, обычную — по href
+	async displayEntry(entry: TocEntry) {
+		if (entry.cfi) {
+			if (await this.tryDisplay(entry.cfi)) {
+				this.currentChapter = entry.label;
+				this.chapterEl?.setText(entry.label);
+				return;
+			}
 		}
+		await this.displayHref(entry.href, entry.label);
+	}
+
+	// сканируем файлы книги и строим оглавление по заголовкам:
+	// h1–h4 + полностью жирные абзацы вида «Глава 228. Наниматель»
+	async generateTocFromHeadings(): Promise<TocEntry[]> {
+		if (!this.book) return [];
+		const spine: any = (this.book as any).spine;
+		const items: any[] = spine?.spineItems ?? [];
+		const entries: TocEntry[] = [];
+		const seen = new Set<string>();
+		const chapterRe =
+			/^(глава|часть|том|книга|пролог|эпилог|интерлюдия|послесловие|предисловие|chapter|part|book|volume|prologue|epilogue|interlude|act)\b/i;
+		const numRe = /^\d{1,4}\s*[.):—-]/;
+		for (const sec of items) {
+			if (entries.length >= 2000) break;
+			try {
+				await sec.load((this.book as any).load.bind(this.book));
+				const doc: Document | undefined = sec.document;
+				if (!doc?.body) continue;
+				const nodes = Array.from(doc.body.querySelectorAll("h1, h2, h3, h4, p"));
+				let pendingNum: { el: Element; text: string } | null = null;
+				for (const el of nodes) {
+					const tag = el.tagName.toLowerCase();
+					let text = String(el.textContent ?? "").replace(/\s+/g, " ").trim();
+					if (!text || text.length > 120) {
+						pendingNum = null;
+						continue;
+					}
+					let isHeading = tag !== "p";
+					if (!isHeading) {
+						const b = el.querySelector("b, strong");
+						const wholeBold =
+							b && String(b.textContent ?? "").replace(/\s+/g, " ").trim() === text;
+						isHeading = Boolean(wholeBold && (chapterRe.test(text) || numRe.test(text)));
+					}
+					if (!isHeading) {
+						pendingNum = null;
+						continue;
+					}
+					// пара «<h2>227.</h2> + <h3>Изобретатель</h3>» — одна глава
+					if (tag !== "p" && /^\d{1,4}\s*[.)]?$/.test(text)) {
+						pendingNum = { el, text: text.replace(/\s*[.)]\s*$/, "") };
+						continue;
+					}
+					let anchorEl: Element = el;
+					if (pendingNum) {
+						text = pendingNum.text + ". " + text;
+						anchorEl = pendingNum.el;
+						pendingNum = null;
+					}
+					const key = String(sec.href ?? "") + "#" + text;
+					if (seen.has(key)) continue;
+					seen.add(key);
+					let cfi = "";
+					try {
+						cfi = String(sec.cfiFromElement?.(anchorEl) ?? "");
+					} catch (e) {
+						/* noop */
+					}
+					entries.push({
+						label: text,
+						href: String(sec.href ?? ""),
+						depth: 0,
+						cfi: cfi || undefined,
+						idx: typeof sec.index === "number" ? sec.index : undefined,
+					});
+				}
+				sec.unload?.();
+			} catch (e) {
+				/* noop */
+			}
+		}
+		return entries;
+	}
+
+	// последняя запись собранного оглавления, которая не позже текущей позиции
+	genTocCurrentIndex(curHref: string, curCfi: string): number {
+		const item = this.findSpineItem(curHref);
+		const curIdx: number = typeof item?.index === "number" ? item.index : -1;
+		if (curIdx < 0) return -1;
+		let cmp: any = null;
+		try {
+			cmp = new EpubCFI();
+		} catch (e) {
+			/* noop */
+		}
+		let best = -1;
+		for (let i = 0; i < this.flatToc.length; i++) {
+			const en = this.flatToc[i];
+			if (typeof en.idx !== "number") continue;
+			if (en.idx < curIdx) {
+				best = i;
+				continue;
+			}
+			if (en.idx === curIdx) {
+				if (!en.cfi || !curCfi || !cmp) {
+					if (best < 0) best = i;
+					continue;
+				}
+				try {
+					if (cmp.compare(en.cfi, curCfi) <= 0) best = i;
+				} catch (e) {
+					/* noop */
+				}
+			}
+		}
+		return best;
 	}
 
 	// главы в EPUB бывают прописаны «кривыми» относительными путями или якорями —
@@ -951,8 +1521,12 @@ class TomeView extends FileView {
 		this.book = null;
 		this.locationsReady = false;
 		this.pendingSelection = "";
+		this.pendingContext = "";
 		this.currentChapter = "";
 		this.flatToc = [];
+		this.flatTocGenerated = false;
+		this.aiAnswer = "";
+		this.aiBusy = false;
 	}
 
 	async onUnloadFile(file: TFile): Promise<void> {
@@ -1089,5 +1663,59 @@ class TomeSettingTab extends PluginSettingTab {
 				this.display();
 			})
 		);
+
+		new Setting(containerEl).setName(L.stAi).setDesc(L.stAiDesc).setHeading();
+
+		new Setting(containerEl).setName(L.stAiPreset).addDropdown((dd) => {
+			dd.addOption("", L.stAiOff)
+				.addOption("groq", "Groq")
+				.addOption("openai", "OpenAI")
+				.addOption("openrouter", "OpenRouter")
+				.addOption("anthropic", "Anthropic (Claude)")
+				.addOption("custom", L.stAiCustom)
+				.setValue(this.plugin.settings.aiPreset)
+				.onChange(async (v) => {
+					this.plugin.settings.aiPreset = v;
+					const p = AI_PRESETS[v];
+					if (p) {
+						if (p.url) this.plugin.settings.aiBaseUrl = p.url;
+						if (p.model) this.plugin.settings.aiModel = p.model;
+					}
+					await this.plugin.saveSettings();
+					this.display();
+				});
+		});
+
+		if (this.plugin.settings.aiPreset) {
+			new Setting(containerEl).setName(L.stAiUrl).addText((tx) => {
+				tx.inputEl.style.width = "100%";
+				tx.setValue(this.plugin.settings.aiBaseUrl).onChange(async (v) => {
+					this.plugin.settings.aiBaseUrl = v.trim();
+					await this.plugin.saveSettings();
+				});
+			});
+
+			new Setting(containerEl)
+				.setName(L.stAiModel)
+				.setDesc(L.stAiModelDesc)
+				.addText((tx) =>
+					tx.setValue(this.plugin.settings.aiModel).onChange(async (v) => {
+						this.plugin.settings.aiModel = v.trim();
+						await this.plugin.saveSettings();
+					})
+				);
+
+			new Setting(containerEl)
+				.setName(L.stAiKey)
+				.setDesc(L.stAiKeyDesc)
+				.addText((tx) => {
+					tx.inputEl.type = "password";
+					tx.inputEl.style.width = "100%";
+					tx.setValue(this.plugin.settings.aiKey).onChange(async (v) => {
+						this.plugin.settings.aiKey = v.trim();
+						await this.plugin.saveSettings();
+					});
+				});
+		}
 	}
 }

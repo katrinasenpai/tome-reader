@@ -369,6 +369,24 @@
 	font-weight: 600;
 }
 
+/* ── AI-ассистент ── */
+.tome-ai-answer {
+	font-size: 13.5px;
+	line-height: 1.45;
+	max-height: 34vh;
+	overflow-y: auto;
+	background: rgba(128, 128, 128, 0.08);
+	border: 1px solid rgba(128, 128, 128, 0.25);
+	border-radius: 8px;
+	padding: 8px 10px;
+	white-space: pre-wrap;
+	user-select: text;
+}
+
+.tome-hidden {
+	display: none;
+}
+
 .is-mobile .tome-selection-actions .tome-btn {
 	padding: 6px 12px;
 	font-size: 15px;
