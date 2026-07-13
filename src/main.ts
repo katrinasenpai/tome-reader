@@ -1,7 +1,6 @@
 import {
 	App,
 	FileView,
-	Menu,
 	Notice,
 	Plugin,
 	PluginSettingTab,
@@ -68,6 +67,7 @@ const STRINGS: Record<Lang, any> = {
 			"gray-fog": "Gray Fog",
 		},
 		toc: "Table of contents",
+		tocFilter: "Filter chapters…",
 		aaTitle: "Appearance",
 		aaSize: "Size",
 		aaSpacing: "Spacing",
@@ -113,6 +113,7 @@ const STRINGS: Record<Lang, any> = {
 			"gray-fog": "Серый Туман",
 		},
 		toc: "Оглавление",
+		tocFilter: "Поиск по главам…",
 		aaTitle: "Оформление",
 		aaSize: "Размер",
 		aaSpacing: "Интервал",
@@ -224,6 +225,10 @@ class TomeView extends FileView {
 	pendingChapter = "";
 	currentChapter = "";
 	locationsReady = false;
+	tocPanel: HTMLElement | null = null;
+	tocListEl: HTMLElement | null = null;
+	tocFilterEl: HTMLInputElement | null = null;
+	flatToc: { label: string; href: string; depth: number }[] = [];
 
 	constructor(leaf: WorkspaceLeaf, plugin: TomePlugin) {
 		super(leaf);
@@ -274,6 +279,9 @@ class TomeView extends FileView {
 
 		// ── панель выделения (создаётся скрытой) ──
 		this.buildSelectionBar(readerWrap);
+
+		// ── панель оглавления (создаётся скрытой) ──
+		this.buildTocPanel(readerWrap);
 
 		// ── книга ──
 		let data: ArrayBuffer;
@@ -341,8 +349,25 @@ class TomeView extends FileView {
 
 		navPrev.onclick = () => void this.rendition?.prev();
 		navNext.onclick = () => void this.rendition?.next();
-		tocBtn.onclick = (ev) => this.showToc(ev);
+		tocBtn.onclick = () => this.toggleToc();
 		aaBtn.onclick = () => this.toggleAaPanel();
+
+		this.flatToc = [];
+		void this.book.loaded.navigation
+			.then((nav: any) => {
+				const walk = (items: any[], depth: number) => {
+					for (const it of items ?? []) {
+						this.flatToc.push({
+							label: String(it?.label ?? "").trim(),
+							href: String(it?.href ?? ""),
+							depth,
+						});
+						if (it?.subitems?.length && depth < 2) walk(it.subitems, depth + 1);
+					}
+				};
+				walk(nav?.toc ?? [], 0);
+			})
+			.catch(() => {});
 
 		void this.book.ready
 			.then(() => this.book!.locations.generate(1024))
@@ -448,6 +473,7 @@ class TomeView extends FileView {
 		if (!this.aaPanel) return;
 		if (this.aaPanel.isShown()) this.aaPanel.hide();
 		else {
+			this.hideToc();
 			this.refreshAaPanel();
 			this.aaPanel.show();
 		}
@@ -672,8 +698,20 @@ class TomeView extends FileView {
 
 	updateProgress(location: any) {
 		const href: string | undefined = location?.start?.href;
-		const tocItem = href && this.book ? this.book.navigation?.get(href) : null;
-		this.currentChapter = tocItem?.label?.trim() ?? "";
+		let label = "";
+		if (href && this.book) {
+			try {
+				label = this.book.navigation?.get(href)?.label?.trim() ?? "";
+			} catch (e) {
+				label = "";
+			}
+			if (!label) {
+				const hit = this.flatToc.find((en) => this.samePath(en.href.split("#")[0], href));
+				if (hit) label = hit.label;
+			}
+		}
+		// TOC не знает этот файл — оставляем последнюю известную главу
+		if (label) this.currentChapter = label;
 		if (this.chapterEl) this.chapterEl.setText(this.currentChapter);
 
 		if (!this.progressEl) return;
@@ -690,50 +728,178 @@ class TomeView extends FileView {
 		this.progressEl.setText("");
 	}
 
-	showToc(ev: MouseEvent) {
-		if (!this.book) return;
-		const menu = new Menu();
-		const addItems = (items: any[], depth: number) => {
-			for (const item of items) {
-				menu.addItem((mi) =>
-					mi
-						.setTitle(" ".repeat(depth * 3) + (item.label ?? "").trim())
-						.onClick(() => void this.displayHref(String(item.href ?? "")))
-				);
-				if (item.subitems?.length && depth < 2) addItems(item.subitems, depth + 1);
-			}
+	// ── собственная панель оглавления: системное меню Obsidian на мобильном
+	// с сотнями пунктов срабатывает не по тому пункту, поэтому список свой ──
+
+	buildTocPanel(parent: HTMLElement) {
+		const L = this.plugin.t();
+		const panel = parent.createDiv({ cls: "tome-toc-panel" });
+		panel.hide();
+		this.tocPanel = panel;
+
+		const head = panel.createDiv({ cls: "tome-toc-head" });
+		head.createDiv({ cls: "tome-toc-head-title", text: L.toc });
+		const closeBtn = head.createEl("button", { cls: "tome-btn", text: "✕" });
+		closeBtn.onclick = () => this.hideToc();
+
+		const filter = panel.createEl("input", { cls: "tome-input tome-toc-filter" });
+		filter.type = "text";
+		filter.placeholder = L.tocFilter;
+		this.tocFilterEl = filter;
+		filter.oninput = () => {
+			const q = filter.value.trim().toLowerCase();
+			this.tocListEl?.querySelectorAll<HTMLElement>(".tome-toc-item").forEach((el) => {
+				el.toggle(!q || (el.textContent ?? "").toLowerCase().includes(q));
+			});
 		};
-		void this.book.loaded.navigation.then((nav: any) => {
-			addItems(nav.toc ?? [], 0);
-			menu.showAtMouseEvent(ev);
-		});
+
+		this.tocListEl = panel.createDiv({ cls: "tome-toc-list" });
 	}
 
-	// у EPUB главы часто прописаны «кривыми» относительными путями — ищем каскадом
-	async displayHref(href: string) {
-		if (!this.rendition || !this.book || !href) return;
-		const tryDisplay = async (h: string) => {
-			try {
-				await this.rendition!.display(h);
-				return true;
-			} catch (e) {
-				return false;
+	toggleToc() {
+		if (!this.tocPanel) return;
+		if (this.tocPanel.isShown()) {
+			this.hideToc();
+			return;
+		}
+		this.aaPanel?.hide();
+		if (this.tocFilterEl) this.tocFilterEl.value = "";
+		this.renderTocList();
+		this.tocPanel.show();
+		const cur = this.tocListEl?.querySelector(".is-current");
+		if (cur) (cur as HTMLElement).scrollIntoView({ block: "center" });
+	}
+
+	hideToc() {
+		this.tocPanel?.hide();
+	}
+
+	renderTocList() {
+		const list = this.tocListEl;
+		if (!list) return;
+		list.empty();
+		const loc = (this.rendition as any)?.currentLocation?.();
+		const curHref = String(loc?.start?.href ?? "");
+		let marked = false;
+		for (const entry of this.flatToc) {
+			const row = list.createDiv({ cls: "tome-toc-item", text: entry.label || "—" });
+			row.setAttr("data-depth", String(entry.depth));
+			if (!marked && curHref && this.samePath(entry.href.split("#")[0], curHref)) {
+				row.addClass("is-current");
+				marked = true;
 			}
-		};
-		if (await tryDisplay(href)) return;
-		const noFrag = href.split("#")[0];
-		if (noFrag && noFrag !== href && (await tryDisplay(noFrag))) return;
-		// поиск подходящего элемента спайна по хвосту пути
-		const spine: any = (this.book as any).spine;
-		const items: any[] = spine?.spineItems ?? spine?.items ?? [];
-		const tail = noFrag.split("/").pop() ?? noFrag;
-		const match = items.find(
-			(it) =>
-				it?.href === noFrag ||
-				(typeof it?.href === "string" && (it.href.endsWith("/" + tail) || it.href.endsWith(tail)))
-		);
-		if (match?.href && (await tryDisplay(match.href))) return;
+			row.onclick = () => {
+				this.hideToc();
+				void this.displayHref(entry.href, entry.label);
+			};
+		}
+	}
+
+	// главы в EPUB бывают прописаны «кривыми» относительными путями или якорями —
+	// цель разрешаем по спайну сами, ничего не угадывая
+	async displayHref(href: string, label?: string) {
+		if (!this.rendition || !this.book || !href) return;
+		const hashAt = href.indexOf("#");
+		const path = hashAt >= 0 ? href.slice(0, hashAt) : href;
+		const frag = hashAt >= 0 ? href.slice(hashAt + 1) : "";
+		const section = this.findSpineItem(path);
+
+		const candidates: string[] = [];
+		if (section?.href) {
+			candidates.push(frag ? section.href + "#" + frag : section.href);
+			if (frag) candidates.push(section.href);
+		} else if (!/^\d+$/.test(href)) {
+			// сырой href — последняя надежда; чисто числовую строку epub.js
+			// трактует как индекс спайна, поэтому её не пропускаем
+			candidates.push(href);
+			if (path && path !== href) candidates.push(path);
+		}
+
+		for (const c of candidates) {
+			if (await this.tryDisplay(c)) {
+				if (label) {
+					this.currentChapter = label;
+					this.chapterEl?.setText(label);
+				}
+				// якорь внутри большого файла: уточняем позицию после раскладки
+				if (frag && c.indexOf("#") >= 0) await this.settleAnchor(frag, c);
+				return;
+			}
+		}
 		new Notice(this.plugin.t().tocFail);
+	}
+
+	async tryDisplay(target: string): Promise<boolean> {
+		try {
+			await this.rendition!.display(target);
+			return true;
+		} catch (e) {
+			return false;
+		}
+	}
+
+	normPath(p: unknown): string {
+		let s = String(p ?? "");
+		try {
+			s = decodeURIComponent(s);
+		} catch (e) {
+			/* оставляем как есть */
+		}
+		return s
+			.replace(/\\/g, "/")
+			.toLowerCase()
+			.split("/")
+			.filter((seg) => seg && seg !== "." && seg !== "..")
+			.join("/");
+	}
+
+	samePath(a: string, b: string): boolean {
+		const na = this.normPath(a);
+		const nb = this.normPath(b);
+		return Boolean(na) && Boolean(nb) && (na === nb || na.endsWith("/" + nb) || nb.endsWith("/" + na));
+	}
+
+	// строгий поиск файла спайна: точное совпадение → совпадение по границе
+	// сегмента → равенство имени файла (никаких «похожих хвостов»)
+	findSpineItem(path: string): any | null {
+		const spine: any = (this.book as any)?.spine;
+		const items: any[] = spine?.spineItems ?? spine?.items ?? [];
+		const target = this.normPath(path);
+		if (!target) return null;
+		let match = items.find((it) => this.normPath(it?.href) === target);
+		if (!match)
+			match = items.find((it) => {
+				const h = this.normPath(it?.href);
+				return h.length > 0 && (h.endsWith("/" + target) || target.endsWith("/" + h));
+			});
+		if (!match) {
+			const base = target.split("/").pop() ?? "";
+			if (base) match = items.find((it) => this.normPath(it?.href).split("/").pop() === base);
+		}
+		return match ?? null;
+	}
+
+	// после перехода по якорю страница могла разложиться уже после расчёта
+	// позиции (медленные устройства) — повторно наводимся на сам элемент главы
+	async settleAnchor(frag: string, target: string) {
+		await new Promise((r) => window.setTimeout(r, 180));
+		try {
+			const contents: any[] = (this.rendition as any)?.getContents?.() ?? [];
+			for (const c of contents) {
+				const doc: Document | undefined = c?.document;
+				if (!doc) continue;
+				const el =
+					doc.getElementById(frag) ??
+					doc.querySelector(`a[name="${frag.replace(/"/g, '\\"')}"]`);
+				if (el && typeof c.cfiFromNode === "function") {
+					const cfi = c.cfiFromNode(el);
+					if (cfi && (await this.tryDisplay(String(cfi)))) return;
+				}
+			}
+			await this.tryDisplay(target);
+		} catch (e) {
+			/* noop */
+		}
 	}
 
 	async applyAppearance(redisplay: boolean) {
@@ -786,6 +952,7 @@ class TomeView extends FileView {
 		this.locationsReady = false;
 		this.pendingSelection = "";
 		this.currentChapter = "";
+		this.flatToc = [];
 	}
 
 	async onUnloadFile(file: TFile): Promise<void> {

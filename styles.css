@@ -208,6 +208,80 @@
 	cursor: pointer;
 }
 
+/* ── панель оглавления ── */
+.tome-toc-panel {
+	position: absolute;
+	top: 8px;
+	left: 10px;
+	bottom: 8px;
+	z-index: 25;
+	width: min(380px, 88%);
+	background: var(--tome-bg, var(--background-primary));
+	color: var(--tome-fg, var(--text-normal));
+	border: 1px solid rgba(128, 128, 128, 0.35);
+	border-radius: 12px;
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+	padding: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.tome-toc-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.tome-toc-head-title {
+	flex: 1;
+	font-weight: 600;
+}
+
+.tome-toc-filter {
+	flex: 0 0 auto;
+	resize: none;
+}
+
+.tome-toc-list {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.tome-toc-item {
+	padding: 6px 10px;
+	border-left: 2px solid transparent;
+	border-radius: 8px;
+	cursor: pointer;
+	font-size: 13.5px;
+	line-height: 1.35;
+}
+
+.tome-toc-item:hover {
+	background: rgba(128, 128, 128, 0.15);
+}
+
+.tome-toc-item.is-current {
+	border-left-color: var(--tome-accent, var(--interactive-accent));
+	color: var(--tome-accent, var(--interactive-accent));
+	font-weight: 600;
+}
+
+.tome-toc-item[data-depth="1"] {
+	padding-left: 26px;
+}
+
+.tome-toc-item[data-depth="2"] {
+	padding-left: 42px;
+}
+
+.is-mobile .tome-toc-item {
+	padding-top: 9px;
+	padding-bottom: 9px;
+	font-size: 14px;
+}
+
 /* ── панель выделения ── */
 .tome-selection-bar {
 	position: absolute;
