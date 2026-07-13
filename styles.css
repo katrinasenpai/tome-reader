@@ -249,6 +249,29 @@
 	gap: 8px;
 }
 
+.tome-dict-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.tome-dict-chip {
+	background: transparent;
+	border: 1px solid rgba(128, 128, 128, 0.4);
+	color: var(--tome-fg, var(--text-normal));
+	border-radius: 8px;
+	padding: 3px 10px;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.tome-dict-chip.is-active {
+	border-color: var(--tome-accent, var(--interactive-accent));
+	color: var(--tome-accent, var(--interactive-accent));
+	font-weight: 600;
+}
+
 .tome-input {
 	width: 100%;
 	resize: vertical;

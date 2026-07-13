@@ -28,7 +28,8 @@ interface TomeSettings {
 	lineHeight: number;
 	customTextColor: string; // "" = theme color
 	noteFolder: string;
-	dictFile: string;
+	dictFiles: string[];
+	lastDict: string;
 	locations: Record<string, string>;
 }
 
@@ -40,7 +41,8 @@ const DEFAULT_SETTINGS: TomeSettings = {
 	lineHeight: 1.6,
 	customTextColor: "",
 	noteFolder: "Books/Notes",
-	dictFile: "",
+	dictFiles: [],
+	lastDict: "",
 	locations: {},
 };
 
@@ -96,8 +98,12 @@ const STRINGS: Record<Lang, any> = {
 		stFontPh: "default",
 		stNoteFolder: "Book notes folder",
 		stNoteFolderDesc: "Where quote notes are created (selection → “To book note”)",
-		stDictFile: "Dictionary file",
-		stDictFileDesc: "Where selected words are added (selection → “To dictionary”)",
+		stDicts: "Dictionaries",
+		stDictsDesc: "Files where selected words are saved. Add several — you'll pick the target when saving",
+		addDict: "+ Add dictionary",
+		dictTo: "To:",
+		dictNone: "Tome: no dictionaries configured — add one in Tome settings",
+		tocFail: "Tome: could not open this chapter",
 	},
 	ru: {
 		themes: {
@@ -137,8 +143,12 @@ const STRINGS: Record<Lang, any> = {
 		stFontPh: "по умолчанию",
 		stNoteFolder: "Папка конспектов",
 		stNoteFolderDesc: "Куда складывать заметки-конспекты (выделение → «В конспект»)",
-		stDictFile: "Файл словаря",
-		stDictFileDesc: "Куда добавлять выделенные слова (выделение → «В словарь»)",
+		stDicts: "Словари",
+		stDictsDesc: "Файлы, куда падают выделенные слова. Добавь несколько — при сохранении выберешь нужный",
+		addDict: "+ Добавить словарь",
+		dictTo: "Куда:",
+		dictNone: "Tome: словари не настроены — добавь в настройках Tome",
+		tocFail: "Tome: не удалось открыть главу",
 	},
 };
 
@@ -160,8 +170,14 @@ export default class TomePlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data: any = (await this.loadData()) ?? {};
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 		if (!this.settings.locations) this.settings.locations = {};
+		if (!Array.isArray(this.settings.dictFiles)) this.settings.dictFiles = [];
+		// миграция со старого одиночного поля dictFile
+		if (data.dictFile && this.settings.dictFiles.length === 0) {
+			this.settings.dictFiles = [data.dictFile];
+		}
 	}
 
 	async saveSettings() {
@@ -202,6 +218,8 @@ class TomeView extends FileView {
 	selInputWrapEl: HTMLElement | null = null;
 	selInputEl: HTMLTextAreaElement | null = null;
 	selMode: "note" | "dict" | null = null;
+	selDictRowEl: HTMLElement | null = null;
+	selDictPath = "";
 	pendingSelection = "";
 	pendingChapter = "";
 	currentChapter = "";
@@ -458,6 +476,8 @@ class TomeView extends FileView {
 		const inputWrap = bar.createDiv({ cls: "tome-selection-input" });
 		inputWrap.hide();
 		this.selInputWrapEl = inputWrap;
+		this.selDictRowEl = inputWrap.createDiv({ cls: "tome-dict-row" });
+		this.selDictRowEl.hide();
 		const input = inputWrap.createEl("textarea", { cls: "tome-input" });
 		input.rows = 2;
 		this.selInputEl = input;
@@ -481,9 +501,41 @@ class TomeView extends FileView {
 		const L = this.plugin.t();
 		this.selInputEl.value = "";
 		this.selInputEl.placeholder = mode === "note" ? L.phNote : L.phDict;
+		if (mode === "dict") this.renderDictChips();
+		else this.selDictRowEl?.hide();
 		this.selActionsEl.hide();
 		this.selInputWrapEl.show();
 		this.selInputEl.focus();
+	}
+
+	renderDictChips() {
+		const row = this.selDictRowEl;
+		if (!row) return;
+		const s = this.plugin.settings;
+		const L = this.plugin.t();
+		row.empty();
+		if (s.dictFiles.length <= 1) {
+			this.selDictPath = s.dictFiles[0] ?? "";
+			row.hide();
+			return;
+		}
+		if (!s.dictFiles.includes(this.selDictPath)) {
+			this.selDictPath =
+				s.lastDict && s.dictFiles.includes(s.lastDict) ? s.lastDict : s.dictFiles[0];
+		}
+		row.createSpan({ cls: "tome-aa-label", text: L.dictTo });
+		for (const p of s.dictFiles) {
+			const name = p.split("/").pop()?.replace(/\.md$/, "") ?? p;
+			const chip = row.createEl("button", {
+				cls: "tome-dict-chip" + (p === this.selDictPath ? " is-active" : ""),
+				text: name,
+			});
+			chip.onclick = () => {
+				this.selDictPath = p;
+				this.renderDictChips();
+			};
+		}
+		row.show();
 	}
 
 	showActionsStage() {
@@ -513,6 +565,20 @@ class TomeView extends FileView {
 		this.pendingSelection = "";
 		this.selMode = null;
 		this.selectionBar?.hide();
+		// планшетное выделение может «увезти» колонку — возвращаем страницу на место
+		void this.realignPage();
+	}
+
+	async realignPage() {
+		const loc = (this.rendition as any)?.currentLocation?.();
+		const cfi = loc?.start?.cfi;
+		if (cfi) {
+			try {
+				await this.rendition?.display(cfi);
+			} catch (e) {
+				/* noop */
+			}
+		}
 	}
 
 	async ensureFolder(path: string) {
@@ -580,16 +646,24 @@ class TomeView extends FileView {
 		if (!this.pendingSelection || !this.file) return;
 		const s = this.plugin.settings;
 		const L = this.plugin.t();
-		const dict = s.dictFile
-			? (this.app.vault.getAbstractFileByPath(normalizePath(s.dictFile)) as TFile | null)
-			: null;
+		if (s.dictFiles.length === 0) {
+			new Notice(L.dictNone);
+			return;
+		}
+		const path =
+			this.selDictPath && s.dictFiles.includes(this.selDictPath)
+				? this.selDictPath
+				: s.dictFiles[0];
+		const dict = this.app.vault.getAbstractFileByPath(normalizePath(path)) as TFile | null;
 		if (!dict) {
-			new Notice(L.dictMissing(s.dictFile || "—"));
+			new Notice(L.dictMissing(path));
 			return;
 		}
 		const word = this.pendingSelection.replace(/\s+/g, " ").trim();
 		const line = `- **${word}**:::${translation || "❓"}`;
 		await this.appendToFile(dict, line, "## 📥 Словарь");
+		s.lastDict = path;
+		await this.plugin.saveSettings();
 		new Notice(L.nAddedDict(word.length > 30 ? word.slice(0, 30) + "…" : word, translation));
 		this.hideSelection();
 	}
@@ -624,7 +698,7 @@ class TomeView extends FileView {
 				menu.addItem((mi) =>
 					mi
 						.setTitle(" ".repeat(depth * 3) + (item.label ?? "").trim())
-						.onClick(() => void this.rendition?.display(item.href))
+						.onClick(() => void this.displayHref(String(item.href ?? "")))
 				);
 				if (item.subitems?.length && depth < 2) addItems(item.subitems, depth + 1);
 			}
@@ -633,6 +707,33 @@ class TomeView extends FileView {
 			addItems(nav.toc ?? [], 0);
 			menu.showAtMouseEvent(ev);
 		});
+	}
+
+	// у EPUB главы часто прописаны «кривыми» относительными путями — ищем каскадом
+	async displayHref(href: string) {
+		if (!this.rendition || !this.book || !href) return;
+		const tryDisplay = async (h: string) => {
+			try {
+				await this.rendition!.display(h);
+				return true;
+			} catch (e) {
+				return false;
+			}
+		};
+		if (await tryDisplay(href)) return;
+		const noFrag = href.split("#")[0];
+		if (noFrag && noFrag !== href && (await tryDisplay(noFrag))) return;
+		// поиск подходящего элемента спайна по хвосту пути
+		const spine: any = (this.book as any).spine;
+		const items: any[] = spine?.spineItems ?? spine?.items ?? [];
+		const tail = noFrag.split("/").pop() ?? noFrag;
+		const match = items.find(
+			(it) =>
+				it?.href === noFrag ||
+				(typeof it?.href === "string" && (it.href.endsWith("/" + tail) || it.href.endsWith(tail)))
+		);
+		if (match?.href && (await tryDisplay(match.href))) return;
+		new Notice(this.plugin.t().tocFail);
 	}
 
 	async applyAppearance(redisplay: boolean) {
@@ -793,16 +894,33 @@ class TomeSettingTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl)
-			.setName(L.stDictFile)
-			.setDesc(L.stDictFileDesc)
-			.addText((tx) =>
-				tx
-					.setValue(this.plugin.settings.dictFile)
-					.onChange(async (v) => {
-						this.plugin.settings.dictFile = v.trim();
+		new Setting(containerEl).setName(L.stDicts).setDesc(L.stDictsDesc).setHeading();
+
+		this.plugin.settings.dictFiles.forEach((path, idx) => {
+			new Setting(containerEl).addText((tx) => {
+				tx.inputEl.style.width = "100%";
+				tx.setValue(path).onChange(async (v) => {
+					this.plugin.settings.dictFiles[idx] = v.trim();
+					await this.plugin.saveSettings();
+				});
+			}).addExtraButton((btn) =>
+				btn
+					.setIcon("x")
+					.setTooltip("✕")
+					.onClick(async () => {
+						this.plugin.settings.dictFiles.splice(idx, 1);
 						await this.plugin.saveSettings();
+						this.display();
 					})
 			);
+		});
+
+		new Setting(containerEl).addButton((btn) =>
+			btn.setButtonText(L.addDict).onClick(async () => {
+				this.plugin.settings.dictFiles.push("");
+				await this.plugin.saveSettings();
+				this.display();
+			})
+		);
 	}
 }
