@@ -387,6 +387,10 @@
 	display: none;
 }
 
+.tome-input-wide {
+	width: 100%;
+}
+
 .is-mobile .tome-selection-actions .tome-btn {
 	padding: 6px 12px;
 	font-size: 15px;

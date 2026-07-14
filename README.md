@@ -12,7 +12,7 @@ A beautiful e-book reader for [Obsidian](https://obsidian.md). Read your EPUB li
 - 🔤 **Aa panel right in the reader:** switch theme, adjust font size, line spacing and even text color on the fly — without leaving the page
 - ✍️ **Typography controls:** custom font family, size, spacing
 - 📑 **Table of contents panel** with chapter search, current-chapter highlight and auto-scroll — works reliably even for books with a thousand chapters
-- 🪄 **Auto-generated TOC:** if a book ships with a broken or empty table of contents (looking at you, converted web novels), Tome scans the text and builds one from the headings — cached per book
+- 🪄 **Auto-generated TOC:** if a book ships with a broken or empty table of contents (looking at you, converted web novels), Tome scans the text and builds one from the headings — cached per book. *Note: books converted from PDF often lose heading markup entirely — Tome builds from whatever headings survived the conversion*
 - 🔖 **Reading position** remembered per book, chapter name and progress % in the header
 - 📱 **Mobile-friendly:** tap zones for page turns, tuned for tablets and phones
 
@@ -26,6 +26,7 @@ A beautiful e-book reader for [Obsidian](https://obsidian.md). Read your EPUB li
 - 🌐 **Translate a selection** with one tap — then send the translation straight into your dictionary
 - 💡 **Explain a fragment** — terms, idioms, cultural references, with the surrounding paragraph as context
 - 📍 **“What happened so far?”** — Tome collects the text *before your current position* and asks the model for a spoiler-safe recap; ask free-form questions about the book the same way
+- 📝 **Save recaps and answers** into the book note with one tap — each lands as a tidy callout with the chapter and progress stamp
 - 🔒 Privacy-transparent: nothing is sent anywhere unless you configure a provider and tap an AI action; only the relevant fragment (or already-read text for book questions) is sent to *your* provider
 
 ### Interface

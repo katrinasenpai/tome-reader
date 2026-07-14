@@ -143,6 +143,8 @@ const STRINGS: Record<Lang, any> = {
 		aiNoKey: "Tome: AI is not set up — pick a provider and add an API key in Tome settings",
 		aiRefusal: "the model declined to answer",
 		aiEmpty: "empty response from the model",
+		aiRecapLabel: "Recap",
+		nSavedAi: (b: string) => "📝 Saved to book note: " + b,
 		stAi: "AI assistant",
 		stAiDesc:
 			"Bring your own API key. Selected fragments (and, for book questions, text you've already read) are sent to the provider you choose",
@@ -212,6 +214,8 @@ const STRINGS: Record<Lang, any> = {
 		aiNoKey: "Tome: AI не настроен — выбери провайдера и добавь API-ключ в настройках Tome",
 		aiRefusal: "модель отказалась отвечать",
 		aiEmpty: "пустой ответ модели",
+		aiRecapLabel: "Пересказ",
+		nSavedAi: (b: string) => "📝 В конспект: " + b,
 		stAi: "AI-ассистент",
 		stAiDesc:
 			"Свой API-ключ. Выделенные фрагменты (а для вопросов по книге — уже прочитанный текст) отправляются выбранному провайдеру",
@@ -391,6 +395,7 @@ class TomeView extends FileView {
 	selAiActionsEl: HTMLElement | null = null;
 	aiMode: "sel" | "book" = "sel";
 	aiAnswer = "";
+	aiLastLabel = "";
 	aiBusy = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: TomePlugin) {
@@ -753,6 +758,10 @@ class TomeView extends FileView {
 			if (this.selInputEl) this.selInputEl.value = ans;
 		};
 		aiToNote.onclick = () => {
+			if (this.aiMode === "book") {
+				void this.saveBookAiToNote();
+				return;
+			}
 			const ans = this.aiAnswer;
 			this.openInputStage("note");
 			if (this.selInputEl) this.selInputEl.value = ans;
@@ -823,9 +832,11 @@ class TomeView extends FileView {
 		el.setText(text);
 		el.toggle(Boolean(text));
 		const hasAnswer = Boolean(this.aiAnswer);
-		const canSave = hasAnswer && this.aiMode === "sel";
-		this.selAiActionsEl?.querySelector(".tome-ai-todict")?.toggleClass("tome-hidden", !canSave);
-		this.selAiActionsEl?.querySelector(".tome-ai-tonote")?.toggleClass("tome-hidden", !canSave);
+		// перевод → словарь только для выделения; в конспект — в обоих режимах
+		this.selAiActionsEl
+			?.querySelector(".tome-ai-todict")
+			?.toggleClass("tome-hidden", !(hasAnswer && this.aiMode === "sel"));
+		this.selAiActionsEl?.querySelector(".tome-ai-tonote")?.toggleClass("tome-hidden", !hasAnswer);
 	}
 
 	async runAi(kind: "translate" | "explain" | "ask") {
@@ -860,6 +871,7 @@ class TomeView extends FileView {
 		const L = this.plugin.t();
 		const q = kind === "ask" ? (this.selAiInputEl?.value ?? "").trim() : "";
 		if (kind === "ask" && !q) return;
+		this.aiLastLabel = kind === "recap" ? L.aiRecapLabel : q.length > 60 ? q.slice(0, 60) + "…" : q;
 		this.aiBusy = true;
 		this.aiAnswer = "";
 		this.setAiAnswer("⏳ " + L.aiReading);
@@ -887,6 +899,23 @@ class TomeView extends FileView {
 				? `Excerpt (the tail of what has been read so far):\n"""${excerpt}"""\n\nBriefly remind me what has been happening: key events and characters, 3–6 bullet points.`
 				: `Excerpt (the tail of what has been read so far):\n"""${excerpt}"""\n\nMy question: ${q}\nIf the excerpt is not enough to answer, say you can't tell yet without spoilers.`;
 		await this.execAi(system, user, L.aiThinking);
+	}
+
+	// пересказ или ответ по книге — в конспект отдельным блоком
+	async saveBookAiToNote() {
+		if (!this.aiAnswer || !this.file) return;
+		const L = this.plugin.t();
+		const note = await this.getOrCreateBookNote();
+		if (!note) return;
+		const pct = String(this.progressEl?.textContent ?? "").trim();
+		const where = [this.currentChapter, pct].filter(Boolean).join(" · ");
+		const title = "✨ " + (this.aiLastLabel || L.aiRecapLabel) + (where ? " — " + where : "");
+		const body = this.aiAnswer
+			.split("\n")
+			.map((l) => "> " + l)
+			.join("\n");
+		await this.appendToFile(note, `> [!tip] ${title}\n${body}`, L.noteHeading);
+		new Notice(L.nSavedAi(this.file.basename));
 	}
 
 	async execAi(system: string, user: string, waitText: string) {
@@ -1065,22 +1094,21 @@ class TomeView extends FileView {
 	}
 
 	async appendToFile(file: TFile, block: string, marker?: string) {
-		let content = await this.app.vault.read(file);
-		if (marker && content.includes(marker)) {
-			const at = content.indexOf(marker) + marker.length;
-			content = content.slice(0, at) + "\n\n" + block + content.slice(at);
-		} else {
-			content = content.trimEnd() + "\n\n" + block + "\n";
-		}
-		await this.app.vault.modify(file, content);
+		await this.app.vault.process(file, (content) => {
+			if (marker && content.includes(marker)) {
+				const at = content.indexOf(marker) + marker.length;
+				return content.slice(0, at) + "\n\n" + block + content.slice(at);
+			}
+			return content.trimEnd() + "\n\n" + block + "\n";
+		});
 	}
 
-	async addSelectionToNote(comment: string) {
-		if (!this.pendingSelection || !this.file) return;
+	async getOrCreateBookNote(): Promise<TFile | null> {
+		if (!this.file) return null;
 		const s = this.plugin.settings;
+		const L = this.plugin.t();
 		await this.ensureFolder(s.noteFolder);
 		const notePath = normalizePath(`${s.noteFolder}/${this.file.basename}.md`);
-		const L = this.plugin.t();
 		let note = this.app.vault.getAbstractFileByPath(notePath) as TFile | null;
 		if (!note) {
 			const initial = [
@@ -1098,6 +1126,14 @@ class TomeView extends FileView {
 			].join("\n");
 			note = await this.app.vault.create(notePath, initial);
 		}
+		return note;
+	}
+
+	async addSelectionToNote(comment: string) {
+		if (!this.pendingSelection || !this.file) return;
+		const L = this.plugin.t();
+		const note = await this.getOrCreateBookNote();
+		if (!note) return;
 		const src = this.pendingChapter || this.currentChapter || "—";
 		const quote = this.pendingSelection
 			.split("\n")
@@ -1639,7 +1675,7 @@ class TomeSettingTab extends PluginSettingTab {
 
 		this.plugin.settings.dictFiles.forEach((path, idx) => {
 			new Setting(containerEl).addText((tx) => {
-				tx.inputEl.style.width = "100%";
+				tx.inputEl.addClass("tome-input-wide");
 				tx.setValue(path).onChange(async (v) => {
 					this.plugin.settings.dictFiles[idx] = v.trim();
 					await this.plugin.saveSettings();
@@ -1688,7 +1724,7 @@ class TomeSettingTab extends PluginSettingTab {
 
 		if (this.plugin.settings.aiPreset) {
 			new Setting(containerEl).setName(L.stAiUrl).addText((tx) => {
-				tx.inputEl.style.width = "100%";
+				tx.inputEl.addClass("tome-input-wide");
 				tx.setValue(this.plugin.settings.aiBaseUrl).onChange(async (v) => {
 					this.plugin.settings.aiBaseUrl = v.trim();
 					await this.plugin.saveSettings();
@@ -1710,7 +1746,7 @@ class TomeSettingTab extends PluginSettingTab {
 				.setDesc(L.stAiKeyDesc)
 				.addText((tx) => {
 					tx.inputEl.type = "password";
-					tx.inputEl.style.width = "100%";
+					tx.inputEl.addClass("tome-input-wide");
 					tx.setValue(this.plugin.settings.aiKey).onChange(async (v) => {
 						this.plugin.settings.aiKey = v.trim();
 						await this.plugin.saveSettings();
