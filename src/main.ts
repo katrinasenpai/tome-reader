@@ -13,6 +13,7 @@ import {
 	requestUrl,
 } from "obsidian";
 import ePub, { Book, EpubCFI, Rendition } from "epubjs";
+import JSZip from "jszip";
 
 const VIEW_TYPE_EPUB = "tome-epub-view";
 
@@ -28,6 +29,12 @@ interface TocEntry {
 	idx?: number; // индекс файла в спайне — для подсветки текущей главы
 }
 
+interface TomeBookmark {
+	cfi: string;
+	label: string;
+	created: number;
+}
+
 interface TomeSettings {
 	language: Lang;
 	theme: TomeTheme;
@@ -40,6 +47,7 @@ interface TomeSettings {
 	lastDict: string;
 	locations: Record<string, string>;
 	genTocs: Record<string, TocEntry[]>; // кэш оглавлений, собранных по заголовкам
+	bookmarks: Record<string, TomeBookmark[]>; // закладки по книгам
 	aiPreset: string; // "" = выключен
 	aiBaseUrl: string;
 	aiModel: string;
@@ -58,6 +66,7 @@ const DEFAULT_SETTINGS: TomeSettings = {
 	lastDict: "",
 	locations: {},
 	genTocs: {},
+	bookmarks: {},
 	aiPreset: "",
 	aiBaseUrl: "",
 	aiModel: "",
@@ -145,6 +154,15 @@ const STRINGS: Record<Lang, any> = {
 		aiEmpty: "empty response from the model",
 		aiRecapLabel: "Recap",
 		nSavedAi: (b: string) => "📝 Saved to book note: " + b,
+		bmSection: "Bookmarks",
+		bmAdded: "🔖 Bookmark added",
+		phEdit: "Corrected text · Enter to save",
+		editSaved: "✏️ Fixed in the book file",
+		editNotFound: "Tome: couldn't find this exact fragment in the chapter file — select a longer piece",
+		editAmbiguous: "Tome: this fragment occurs several times in the chapter — select a longer piece",
+		editFail: "Tome: could not edit the book: ",
+		stAiTest: "Test connection",
+		stAiTestOk: "✅ AI responds: ",
 		stAi: "AI assistant",
 		stAiDesc:
 			"Bring your own API key. Selected fragments (and, for book questions, text you've already read) are sent to the provider you choose",
@@ -216,6 +234,15 @@ const STRINGS: Record<Lang, any> = {
 		aiEmpty: "пустой ответ модели",
 		aiRecapLabel: "Пересказ",
 		nSavedAi: (b: string) => "📝 В конспект: " + b,
+		bmSection: "Закладки",
+		bmAdded: "🔖 Закладка добавлена",
+		phEdit: "Исправленный текст · Enter — сохранить",
+		editSaved: "✏️ Исправлено в файле книги",
+		editNotFound: "Tome: не нашла точное совпадение в файле главы — выдели фрагмент подлиннее",
+		editAmbiguous: "Tome: фрагмент встречается в главе несколько раз — выдели подлиннее",
+		editFail: "Tome: не удалось изменить книгу: ",
+		stAiTest: "Проверить подключение",
+		stAiTestOk: "✅ AI отвечает: ",
 		stAi: "AI-ассистент",
 		stAiDesc:
 			"Свой API-ключ. Выделенные фрагменты (а для вопросов по книге — уже прочитанный текст) отправляются выбранному провайдеру",
@@ -253,6 +280,7 @@ export default class TomePlugin extends Plugin {
 		if (!this.settings.locations) this.settings.locations = {};
 		if (!Array.isArray(this.settings.dictFiles)) this.settings.dictFiles = [];
 		if (!this.settings.genTocs) this.settings.genTocs = {};
+		if (!this.settings.bookmarks) this.settings.bookmarks = {};
 		// миграция со старого одиночного поля dictFile
 		if (data.dictFile && this.settings.dictFiles.length === 0) {
 			this.settings.dictFiles = [data.dictFile];
@@ -374,14 +402,16 @@ class TomeView extends FileView {
 	selActionsEl: HTMLElement | null = null;
 	selInputWrapEl: HTMLElement | null = null;
 	selInputEl: HTMLTextAreaElement | null = null;
-	selMode: "note" | "dict" | null = null;
+	selMode: "note" | "dict" | "edit" | null = null;
 	selDictRowEl: HTMLElement | null = null;
 	selDictPath = "";
 	pendingSelection = "";
 	pendingContext = "";
+	pendingCfiRange = "";
 	pendingChapter = "";
 	currentChapter = "";
 	locationsReady = false;
+	resizeObs: ResizeObserver | null = null;
 	tocPanel: HTMLElement | null = null;
 	tocListEl: HTMLElement | null = null;
 	tocFilterEl: HTMLInputElement | null = null;
@@ -431,6 +461,8 @@ class TomeView extends FileView {
 		header.createDiv({ cls: "tome-title", text: file.basename });
 		this.chapterEl = header.createDiv({ cls: "tome-chapter", text: "" });
 		this.progressEl = header.createDiv({ cls: "tome-progress", text: "…" });
+		const bmHeaderBtn = header.createEl("button", { cls: "tome-btn", text: "🔖" });
+		bmHeaderBtn.setAttr("aria-label", L.bmSection);
 		const aiHeaderBtn = header.createEl("button", { cls: "tome-btn", text: "✨" });
 		aiHeaderBtn.setAttr("aria-label", L.aiBtn);
 		const aaBtn = header.createEl("button", { cls: "tome-btn tome-aa-btn", text: "Aa" });
@@ -485,6 +517,28 @@ class TomeView extends FileView {
 			await this.rendition.display();
 		}
 
+		// дробная ширина панели ломает раскладку колонок epub.js — последняя
+		// страница главы «проглатывается»; держим чётные целые размеры
+		const applySize = debounce(
+			() => {
+				const w = Math.floor(readerEl.clientWidth / 2) * 2;
+				const h = Math.floor(readerEl.clientHeight);
+				if (w > 0 && h > 0 && this.rendition) {
+					try {
+						(this.rendition as any).resize(w, h);
+					} catch (e) {
+						/* noop */
+					}
+				}
+			},
+			150,
+			true
+		);
+		applySize();
+		this.resizeObs?.disconnect();
+		this.resizeObs = new ResizeObserver(() => applySize());
+		this.resizeObs.observe(readerEl);
+
 		// ── события ──
 		this.rendition.on("relocated", (location: any) => {
 			const cfi: string | undefined = location?.start?.cfi;
@@ -492,7 +546,7 @@ class TomeView extends FileView {
 			this.updateProgress(location);
 		});
 
-		this.rendition.on("selected", (_cfiRange: string, contents: any) => {
+		this.rendition.on("selected", (cfiRange: string, contents: any) => {
 			try {
 				const sel = contents?.window?.getSelection?.();
 				const text = sel ? String(sel.toString()).trim() : "";
@@ -508,11 +562,18 @@ class TomeView extends FileView {
 				} catch (e) {
 					/* noop */
 				}
-				if (text) this.showSelection(text, para);
+				if (text) this.showSelection(text, para, String(cfiRange ?? ""));
 			} catch (e) {
 				/* noop */
 			}
 		});
+
+		const turnPage = (dir: "prev" | "next") => {
+			if (!this.rendition) return;
+			this.animateTurn(dir);
+			if (dir === "prev") void this.rendition.prev();
+			else void this.rendition.next();
+		};
 
 		const keyHandler = (e: KeyboardEvent) => {
 			const target = e.target as HTMLElement | null;
@@ -523,17 +584,18 @@ class TomeView extends FileView {
 					target.isContentEditable)
 			)
 				return; // печатаем в поле — страницы не трогаем
-			if (e.key === "ArrowLeft") void this.rendition?.prev();
-			if (e.key === "ArrowRight" || e.key === " ") void this.rendition?.next();
+			if (e.key === "ArrowLeft") turnPage("prev");
+			if (e.key === "ArrowRight" || e.key === " ") turnPage("next");
 		};
 		this.rendition.on("keydown", keyHandler);
 		this.registerDomEvent(container, "keydown", keyHandler);
 
-		navPrev.onclick = () => void this.rendition?.prev();
-		navNext.onclick = () => void this.rendition?.next();
+		navPrev.onclick = () => turnPage("prev");
+		navNext.onclick = () => turnPage("next");
 		tocBtn.onclick = () => this.toggleToc();
 		aaBtn.onclick = () => this.toggleAaPanel();
 		aiHeaderBtn.onclick = () => this.openBookAi();
+		bmHeaderBtn.onclick = () => void this.addBookmarkHere();
 
 		this.flatToc = [];
 		this.flatTocGenerated = false;
@@ -697,10 +759,16 @@ class TomeView extends FileView {
 		const dictBtn = actions.createEl("button", { cls: "tome-btn", text: L.toDict });
 		const aiBtn = actions.createEl("button", { cls: "tome-btn", text: L.aiBtn });
 		this.selAiBtn = aiBtn;
+		const bmBtn = actions.createEl("button", { cls: "tome-btn", text: "🔖" });
+		bmBtn.setAttr("aria-label", L.bmSection);
+		const editBtn = actions.createEl("button", { cls: "tome-btn", text: "✏️" });
+		editBtn.setAttr("aria-label", L.phEdit);
 		const closeBtn = actions.createEl("button", { cls: "tome-btn", text: "✕" });
 		noteBtn.onclick = () => this.openInputStage("note");
 		dictBtn.onclick = () => this.openInputStage("dict");
 		aiBtn.onclick = () => this.openAiStage("sel");
+		bmBtn.onclick = () => void this.addSelectionBookmark();
+		editBtn.onclick = () => this.openInputStage("edit");
 		closeBtn.onclick = () => this.hideSelection();
 
 		// этап 2 — поле для мысли/перевода
@@ -986,12 +1054,13 @@ class TomeView extends FileView {
 		return text.replace(/\s+/g, " ").trim().slice(-maxChars);
 	}
 
-	openInputStage(mode: "note" | "dict") {
+	openInputStage(mode: "note" | "dict" | "edit") {
 		this.selMode = mode;
 		if (!this.selInputEl || !this.selInputWrapEl || !this.selActionsEl) return;
 		const L = this.plugin.t();
-		this.selInputEl.value = "";
-		this.selInputEl.placeholder = mode === "note" ? L.phNote : L.phDict;
+		// для правки опечатки стартуем с исходного текста выделения
+		this.selInputEl.value = mode === "edit" ? this.pendingSelection : "";
+		this.selInputEl.placeholder = mode === "note" ? L.phNote : mode === "dict" ? L.phDict : L.phEdit;
 		if (mode === "dict") this.renderDictChips();
 		else this.selDictRowEl?.hide();
 		this.selActionsEl.hide();
@@ -1041,11 +1110,13 @@ class TomeView extends FileView {
 		const extra = (this.selInputEl?.value ?? "").trim();
 		if (this.selMode === "note") await this.addSelectionToNote(extra);
 		else if (this.selMode === "dict") await this.addSelectionToDict(extra);
+		else if (this.selMode === "edit") await this.addEditToBook(extra);
 	}
 
-	showSelection(text: string, context = "") {
+	showSelection(text: string, context = "", cfiRange = "") {
 		this.pendingSelection = text;
 		this.pendingContext = context;
+		this.pendingCfiRange = cfiRange;
 		this.pendingChapter = this.currentChapter; // глава на момент выделения
 		if (this.selectionTextEl) {
 			const short = text.length > 120 ? text.slice(0, 120) + "…" : text;
@@ -1059,11 +1130,106 @@ class TomeView extends FileView {
 	hideSelection() {
 		this.pendingSelection = "";
 		this.pendingContext = "";
+		this.pendingCfiRange = "";
 		this.aiAnswer = "";
 		this.selMode = null;
 		this.selectionBar?.hide();
 		// планшетное выделение может «увезти» колонку — возвращаем страницу на место
 		void this.realignPage();
+	}
+
+	// ─────────────────── закладки ───────────────────
+
+	getBookmarks(): TomeBookmark[] {
+		const key = this.file?.path ?? "";
+		if (!key) return [];
+		const s = this.plugin.settings;
+		if (!s.bookmarks[key]) s.bookmarks[key] = [];
+		return s.bookmarks[key];
+	}
+
+	async addBookmark(cfi: string, label: string) {
+		if (!cfi || !this.file) return;
+		this.getBookmarks().push({ cfi, label: label.slice(0, 80), created: Date.now() });
+		await this.plugin.saveSettings();
+		new Notice(this.plugin.t().bmAdded);
+	}
+
+	// закладка «я сейчас здесь» — из кнопки в шапке
+	async addBookmarkHere() {
+		const loc = (this.rendition as any)?.currentLocation?.();
+		const cfi = String(loc?.start?.cfi ?? "");
+		const pct = String(this.progressEl?.textContent ?? "").trim();
+		const label = [this.currentChapter || this.file?.basename || "", pct]
+			.filter(Boolean)
+			.join(" · ");
+		await this.addBookmark(cfi, label || "—");
+	}
+
+	// закладка на выделенном фрагменте — подписью служит сам текст
+	async addSelectionBookmark() {
+		const loc = (this.rendition as any)?.currentLocation?.();
+		const cfi = this.pendingCfiRange || String(loc?.start?.cfi ?? "");
+		const label = this.pendingSelection.replace(/\s+/g, " ").trim().slice(0, 60);
+		await this.addBookmark(cfi, label || "—");
+		this.hideSelection();
+	}
+
+	// лёгкая анимация перелистывания (уважает prefers-reduced-motion)
+	animateTurn(dir: "prev" | "next") {
+		const el = this.contentEl.querySelector(".tome-reader") as HTMLElement | null;
+		if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+		el.removeClass("tome-turn-next");
+		el.removeClass("tome-turn-prev");
+		void el.offsetWidth; // перезапуск CSS-анимации
+		const cls = dir === "next" ? "tome-turn-next" : "tome-turn-prev";
+		el.addClass(cls);
+		window.setTimeout(() => el.removeClass(cls), 240);
+	}
+
+	// правка опечаток: заменяем фрагмент прямо в html-файле внутри epub-архива
+	async addEditToBook(newText: string) {
+		const L = this.plugin.t();
+		if (!this.pendingSelection || !this.file || !this.book) return;
+		if (!newText || newText === this.pendingSelection) {
+			this.hideSelection();
+			return;
+		}
+		try {
+			const loc = (this.rendition as any)?.currentLocation?.();
+			const sec = this.findSpineItem(String(loc?.start?.href ?? ""));
+			if (!sec?.href) throw new Error(L.editNotFound);
+			const data = await this.app.vault.readBinary(this.file);
+			const zip = await JSZip.loadAsync(data);
+			// файл главы внутри архива ищем по хвосту пути
+			const target = Object.keys(zip.files).find((n) => this.samePath(n, String(sec.href)));
+			if (!target) throw new Error(L.editNotFound);
+			const html = await zip.files[target].async("string");
+			// точное совпадение (с гибкими пробелами); правим только уникальный фрагмент
+			const esc = this.pendingSelection.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+			const re = new RegExp(esc.replace(/\s+/g, "\\s+"), "g");
+			const matches = html.match(re);
+			if (!matches || matches.length === 0) {
+				new Notice(L.editNotFound);
+				return;
+			}
+			if (matches.length > 1) {
+				new Notice(L.editAmbiguous);
+				return;
+			}
+			zip.file(target, html.replace(re, () => newText));
+			const out = await zip.generateAsync({
+				type: "arraybuffer",
+				compression: "DEFLATE",
+				compressionOptions: { level: 6 },
+			});
+			await this.app.vault.modifyBinary(this.file, out);
+			new Notice(L.editSaved);
+			// перечитываем книгу; позиция вернётся из сохранённого CFI
+			await this.onLoadFile(this.file);
+		} catch (e) {
+			new Notice(L.editFail + String((e as Error)?.message ?? e));
+		}
 	}
 
 	async realignPage() {
@@ -1260,6 +1426,28 @@ class TomeView extends FileView {
 		const list = this.tocListEl;
 		if (!list) return;
 		list.empty();
+		const L = this.plugin.t();
+		// закладки — отдельным блоком над главами
+		const bms = this.getBookmarks();
+		if (bms.length) {
+			list.createDiv({ cls: "tome-toc-item tome-toc-section", text: L.bmSection });
+			bms.forEach((bm, i) => {
+				const row = list.createDiv({ cls: "tome-toc-item tome-bm-item" });
+				row.createSpan({ cls: "tome-bm-label", text: "🔖 " + (bm.label || "—") });
+				const del = row.createEl("button", { cls: "tome-btn tome-bm-del", text: "✕" });
+				del.onclick = (ev) => {
+					ev.stopPropagation();
+					bms.splice(i, 1);
+					void this.plugin.saveSettings();
+					this.renderTocList();
+				};
+				row.onclick = () => {
+					this.hideToc();
+					void this.tryDisplay(bm.cfi);
+				};
+			});
+			if (this.flatToc.length) list.createDiv({ cls: "tome-toc-item tome-toc-section", text: L.toc });
+		}
 		const loc = (this.rendition as any)?.currentLocation?.();
 		const curHref = String(loc?.start?.href ?? "");
 		const curCfi = String(loc?.start?.cfi ?? "");
@@ -1543,6 +1731,8 @@ class TomeView extends FileView {
 	}
 
 	async closeBook() {
+		this.resizeObs?.disconnect();
+		this.resizeObs = null;
 		try {
 			this.rendition?.destroy();
 		} catch (e) {
@@ -1752,6 +1942,23 @@ class TomeSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 				});
+
+			new Setting(containerEl).addButton((btn) =>
+				btn.setButtonText(L.stAiTest).onClick(async () => {
+					btn.setDisabled(true);
+					try {
+						const r = await this.plugin.aiChat(
+							"You are a connectivity test. Reply with exactly: OK",
+							"ping"
+						);
+						new Notice(L.stAiTestOk + r.slice(0, 40));
+					} catch (e) {
+						new Notice("Tome AI: " + String((e as Error)?.message ?? e));
+					} finally {
+						btn.setDisabled(false);
+					}
+				})
+			);
 		}
 	}
 }

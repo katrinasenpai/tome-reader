@@ -391,6 +391,70 @@
 	width: 100%;
 }
 
+/* ── закладки в панели оглавления ── */
+.tome-toc-section {
+	opacity: 0.55;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	cursor: default;
+	margin-top: 4px;
+}
+
+.tome-toc-section:hover {
+	background: transparent;
+}
+
+.tome-bm-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.tome-bm-label {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tome-bm-del {
+	flex: 0 0 auto;
+	padding: 1px 7px;
+	font-size: 12px;
+}
+
+/* ── анимация перелистывания ── */
+@keyframes tome-turn-next {
+	from {
+		opacity: 0.55;
+		transform: translateX(16px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+@keyframes tome-turn-prev {
+	from {
+		opacity: 0.55;
+		transform: translateX(-16px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+.tome-turn-next {
+	animation: tome-turn-next 220ms ease-out;
+}
+
+.tome-turn-prev {
+	animation: tome-turn-prev 220ms ease-out;
+}
+
 .is-mobile .tome-selection-actions .tome-btn {
 	padding: 6px 12px;
 	font-size: 15px;

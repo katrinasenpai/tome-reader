@@ -14,11 +14,13 @@ A beautiful e-book reader for [Obsidian](https://obsidian.md). Read your EPUB li
 - 📑 **Table of contents panel** with chapter search, current-chapter highlight and auto-scroll — works reliably even for books with a thousand chapters
 - 🪄 **Auto-generated TOC:** if a book ships with a broken or empty table of contents (looking at you, converted web novels), Tome scans the text and builds one from the headings — cached per book. *Note: books converted from PDF often lose heading markup entirely — Tome builds from whatever headings survived the conversion*
 - 🔖 **Reading position** remembered per book, chapter name and progress % in the header
-- 📱 **Mobile-friendly:** tap zones for page turns, tuned for tablets and phones
+- 📌 **Bookmarks:** drop one at the current page from the header, or pin a selected passage — they live at the top of the TOC panel, one tap to jump back. Wander around the book freely; your marked spot waits for you
+- 📱 **Mobile-friendly:** tap zones for page turns with a subtle turn animation (respects reduced-motion), tuned for tablets and phones
 
 ### Capture while you read
 - 📝 **Selection → book note:** select a passage, add your own thought inline, and Tome saves the quote (with chapter reference) into a per-book note — created automatically
 - 🈶 **Selection → dictionary:** select a word, type its translation right there, and it lands in your dictionary file as a spaced-repetition-ready line (`word:::translation`) — pairs perfectly with the [Spaced Repetition](https://github.com/st3v3nmw/obsidian-spaced-repetition) plugin
+- ✏️ **Fix typos right in the book:** select a flawed fragment, type the correction — Tome edits the EPUB file itself (only when the fragment is unique in the chapter, so nothing gets mangled)
 - ⌨️ Enter to save, Esc to go back — your reading flow stays unbroken
 
 ### AI assistant (bring your own key)
