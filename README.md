@@ -30,6 +30,7 @@ A beautiful e-book reader for [Obsidian](https://obsidian.md). Read your EPUB li
 - 📍 **“What happened so far?”** — Tome collects the text *before your current position* and asks the model for a spoiler-safe recap; ask free-form questions about the book the same way
 - 📝 **Save recaps and answers** into the book note with one tap — each lands as a tidy callout with the chapter and progress stamp
 - 🔒 Privacy-transparent: nothing is sent anywhere unless you configure a provider and tap an AI action; only the relevant fragment (or already-read text for book questions) is sent to *your* provider
+- 🌍 Provider geo-blocked in your region? The Base URL is editable — point it at your own relay (e.g. a tiny Cloudflare Worker that forwards requests to the API host) and keep the same key. A **Test connection** button in settings tells you right away if the route works
 
 ### Interface
 - 🌐 **English and Russian** UI (English by default — switch in settings)
