@@ -1,7 +1,7 @@
 {
 	"id": "tome-reader",
 	"name": "Tome",
-	"version": "0.7.1",
+	"version": "0.7.2",
 	"minAppVersion": "1.5.0",
 	"description": "Read EPUB books in beautiful themes, capture quotes and vocabulary into notes, get auto-built tables of contents, and optionally plug in your own AI key for translations and recaps.",
 	"author": "katrinasenpai",

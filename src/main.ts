@@ -136,7 +136,7 @@ const STRINGS: Record<Lang, any> = {
 		stFontDesc: "Font family (empty = book default). E.g.: Georgia, Noto Serif",
 		stFontPh: "default",
 		stTurnAnim: "Page turn animation",
-		stTurnAnimDesc: "A light slide on page turns. Off = instant turns, as before",
+		stTurnAnimDesc: "A light slide on page turns. When off, pages change instantly",
 		stNoteFolder: "Book notes folder",
 		stNoteFolderDesc: "Where quote notes are created (selection → “To book note”)",
 		stDicts: "Dictionaries",
@@ -152,7 +152,7 @@ const STRINGS: Record<Lang, any> = {
 		aiRecap: "📍 What happened so far?",
 		phAsk: "Or ask your own question · Enter",
 		aiThinking: "Thinking…",
-		aiReading: "Re-reading the book…",
+		aiReading: "Collecting the text read so far…",
 		aiNoText: "Tome: could not collect the text before your position",
 		aiNoKey: "Tome: AI is not set up — pick a provider and add an API key in Tome settings",
 		aiRefusal: "the model declined to answer",
@@ -194,22 +194,22 @@ const STRINGS: Record<Lang, any> = {
 		aaSpacing: "Интервал",
 		aaTextColor: "Цвет текста",
 		aaReset: "Сброс",
-		toNote: "📝 В конспект",
+		toNote: "📝 В заметку книги",
 		toDict: "🈶 В словарь",
 		save: "💾 Сохранить",
 		back: "↩ Назад",
-		phNote: "Твоя мысль к цитате (можно оставить пустым) · Enter — сохранить",
+		phNote: "Мысль к цитате (необязательно) · Enter — сохранить",
 		phDict: "Перевод или комментарий (пусто = ❓) · Enter — сохранить",
-		extTaken: "Tome: расширение .epub уже занято другим плагином. Отключи его и перезапусти Obsidian.",
+		extTaken: "Tome: расширение .epub уже занято другим плагином. Отключите его и перезапустите Obsidian.",
 		readFail: "Не удалось прочитать файл: ",
 		openFail: "Tome не смог открыть эту книгу: ",
-		dictMissing: (p: string) => "Tome: файл словаря не найден: " + p + " (укажи в настройках Tome)",
-		nAddedNote: (b: string, c: boolean) => "📝 В конспект" + (c ? " (с мыслью)" : "") + ": " + b,
-		nAddedDict: (w: string, tr: string) => "🈶 В словарь: " + w + (tr ? " → " + tr : " — впиши перевод вместо ❓ позже"),
-		noteIntro: (b: string) => `*Конспект: ${b} (создан из Tome).*`,
+		dictMissing: (p: string) => "Tome: файл словаря не найден: " + p + " (проверьте путь в настройках Tome)",
+		nAddedNote: (b: string, c: boolean) => "📝 В заметку книги" + (c ? " (с комментарием)" : "") + ": " + b,
+		nAddedDict: (w: string, tr: string) => "🈶 В словарь: " + w + (tr ? " → " + tr : " — перевод можно вписать вместо ❓ позже"),
+		noteIntro: (b: string) => `*Заметка книги: ${b} (создана в Tome).*`,
 		noteHeading: "## 🔖 Выделения",
 		stLanguage: "Язык",
-		stLanguageDesc: "Язык интерфейса плагина (переоткрой книгу, чтобы применить)",
+		stLanguageDesc: "Язык интерфейса плагина. Чтобы применить, переоткройте книгу",
 		stTheme: "Тема",
 		stThemeDesc: "Оформление страницы книги (доступно и в панели Aa при чтении)",
 		stFontSize: "Размер шрифта",
@@ -218,14 +218,14 @@ const STRINGS: Record<Lang, any> = {
 		stFontDesc: "Название шрифта (пусто = шрифт книги). Например: Georgia, Noto Serif",
 		stFontPh: "по умолчанию",
 		stTurnAnim: "Анимация перелистывания",
-		stTurnAnimDesc: "Лёгкий сдвиг страницы при листании. Выкл = мгновенно, как раньше",
-		stNoteFolder: "Папка конспектов",
-		stNoteFolderDesc: "Куда складывать заметки-конспекты (выделение → «В конспект»)",
+		stTurnAnimDesc: "Лёгкий сдвиг страницы при перелистывании. Выключено — смена страниц мгновенная",
+		stNoteFolder: "Папка заметок книг",
+		stNoteFolderDesc: "Папка, в которой создаются заметки с цитатами (кнопка «В заметку книги»)",
 		stDicts: "Словари",
-		stDictsDesc: "Файлы, куда падают выделенные слова. Добавь несколько — при сохранении выберешь нужный",
+		stDictsDesc: "Файлы, в которые сохраняются выделенные слова. Если словарей несколько, нужный выбирается при сохранении",
 		addDict: "+ Добавить словарь",
 		dictTo: "Куда:",
-		dictNone: "Tome: словари не настроены — добавь в настройках Tome",
+		dictNone: "Tome: словари не настроены — добавьте словарь в настройках Tome",
 		tocFail: "Tome: не удалось открыть главу",
 		tocBuilt: (n: number) => `Tome: оглавление собрано по заголовкам (${n} глав)`,
 		aiBtn: "✨ AI",
@@ -234,9 +234,9 @@ const STRINGS: Record<Lang, any> = {
 		aiRecap: "📍 Что было раньше?",
 		phAsk: "Или свой вопрос · Enter — спросить",
 		aiThinking: "Думаю…",
-		aiReading: "Перечитываю книгу…",
+		aiReading: "Собираю прочитанный текст…",
 		aiNoText: "Tome: не удалось собрать текст до текущего места",
-		aiNoKey: "Tome: AI не настроен — выбери провайдера и добавь API-ключ в настройках Tome",
+		aiNoKey: "Tome: AI не настроен — укажите провайдера и API-ключ в настройках Tome",
 		aiRefusal: "модель отказалась отвечать",
 		aiEmpty: "пустой ответ модели",
 		aiRecapLabel: "Пересказ",
@@ -245,8 +245,8 @@ const STRINGS: Record<Lang, any> = {
 		bmAdded: "🔖 Закладка добавлена",
 		phEdit: "Исправленный текст · Enter — сохранить",
 		editSaved: "✏️ Исправлено в файле книги",
-		editNotFound: "Tome: не нашла точное совпадение в файле главы — выдели фрагмент подлиннее",
-		editAmbiguous: "Tome: фрагмент встречается в главе несколько раз — выдели подлиннее",
+		editNotFound: "Tome: точное совпадение в файле главы не найдено — выделите фрагмент подлиннее",
+		editAmbiguous: "Tome: фрагмент встречается в главе несколько раз — выделите подлиннее",
 		editFail: "Tome: не удалось изменить книгу: ",
 		stAiTest: "Проверить подключение",
 		stAiTestOk: "✅ AI отвечает: ",
@@ -594,7 +594,7 @@ class TomeView extends FileView {
 			if (!this.rendition) return;
 			this.animateTurn(dir);
 			if (dir === "prev") void this.rendition.prev();
-			else void this.rendition.next();
+			else void this.turnNext();
 		};
 
 		const keyHandler = (e: KeyboardEvent) => {
@@ -1195,6 +1195,38 @@ class TomeView extends FileView {
 		const label = this.pendingSelection.replace(/\s+/g, " ").trim().slice(0, 60);
 		await this.addBookmark(cfi, label || "—");
 		this.hideSelection();
+	}
+
+	// штатный next() у epub.js при неровной ширине контента пропускает
+	// неполную последнюю страницу главы: его проверка «есть ли ещё страница»
+	// требует ровно целую. Если впереди остался кусок меньше страницы —
+	// докручиваем к нему сами вместо прыжка в следующую главу
+	async turnNext() {
+		if (!this.rendition) return;
+		try {
+			const mgr: any = (this.rendition as any).manager;
+			const container: HTMLElement | undefined = mgr?.container;
+			const delta = Number(mgr?.layout?.delta ?? 0);
+			const rtl = mgr?.settings?.direction === "rtl";
+			if (container && delta > 0 && !rtl) {
+				const remaining =
+					container.scrollWidth - (container.scrollLeft + container.offsetWidth);
+				if (remaining > 2 && remaining < delta) {
+					mgr.scrollBy(delta, 0, true); // прокрутка сама обрежется по краю контента
+					window.setTimeout(() => {
+						try {
+							(this.rendition as any)?.reportLocation?.();
+						} catch (e) {
+							/* noop */
+						}
+					}, 60);
+					return;
+				}
+			}
+		} catch (e) {
+			/* noop — падаем на штатное перелистывание */
+		}
+		await this.rendition.next();
 	}
 
 	// лёгкая анимация перелистывания — опция, по умолчанию выключена

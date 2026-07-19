@@ -1,6 +1,6 @@
 {
 	"name": "tome-reader",
-	"version": "0.7.1",
+	"version": "0.7.2",
 	"description": "A beautiful e-book reader plugin for Obsidian",
 	"main": "main.js",
 	"scripts": {
