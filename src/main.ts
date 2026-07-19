@@ -2,6 +2,7 @@ import {
 	App,
 	FileView,
 	Notice,
+	Platform,
 	Plugin,
 	PluginSettingTab,
 	Setting,
@@ -42,6 +43,7 @@ interface TomeSettings {
 	fontFamily: string;
 	lineHeight: number;
 	customTextColor: string; // "" = theme color
+	turnAnimation: boolean;
 	noteFolder: string;
 	dictFiles: string[];
 	lastDict: string;
@@ -61,6 +63,7 @@ const DEFAULT_SETTINGS: TomeSettings = {
 	fontFamily: "",
 	lineHeight: 1.6,
 	customTextColor: "",
+	turnAnimation: false,
 	noteFolder: "Books/Notes",
 	dictFiles: [],
 	lastDict: "",
@@ -132,6 +135,8 @@ const STRINGS: Record<Lang, any> = {
 		stFont: "Font",
 		stFontDesc: "Font family (empty = book default). E.g.: Georgia, Noto Serif",
 		stFontPh: "default",
+		stTurnAnim: "Page turn animation",
+		stTurnAnimDesc: "A light slide on page turns. Off = instant turns, as before",
 		stNoteFolder: "Book notes folder",
 		stNoteFolderDesc: "Where quote notes are created (selection → “To book note”)",
 		stDicts: "Dictionaries",
@@ -212,6 +217,8 @@ const STRINGS: Record<Lang, any> = {
 		stFont: "Шрифт",
 		stFontDesc: "Название шрифта (пусто = шрифт книги). Например: Georgia, Noto Serif",
 		stFontPh: "по умолчанию",
+		stTurnAnim: "Анимация перелистывания",
+		stTurnAnimDesc: "Лёгкий сдвиг страницы при листании. Выкл = мгновенно, как раньше",
 		stNoteFolder: "Папка конспектов",
 		stNoteFolderDesc: "Куда складывать заметки-конспекты (выделение → «В конспект»)",
 		stDicts: "Словари",
@@ -414,6 +421,7 @@ class TomeView extends FileView {
 	resizeObs: ResizeObserver | null = null;
 	tocPanel: HTMLElement | null = null;
 	tocListEl: HTMLElement | null = null;
+	tocBmWrapEl: HTMLElement | null = null;
 	tocFilterEl: HTMLInputElement | null = null;
 	flatToc: TocEntry[] = [];
 	flatTocGenerated = false;
@@ -496,9 +504,13 @@ class TomeView extends FileView {
 
 		try {
 			this.book = ePub(data);
+			// целые чётные размеры с самого старта: дробная ширина ломает
+			// колоночную раскладку — «проглатывается» последняя страница главы
+			const w0 = Math.floor(readerEl.clientWidth / 2) * 2;
+			const h0 = Math.floor(readerEl.clientHeight);
 			this.rendition = this.book.renderTo(readerEl, {
-				width: "100%",
-				height: "100%",
+				width: w0 > 0 ? w0 : "100%",
+				height: h0 > 0 ? h0 : "100%",
 				flow: "paginated",
 				spread: "none",
 				allowScriptedContent: false,
@@ -517,24 +529,34 @@ class TomeView extends FileView {
 			await this.rendition.display();
 		}
 
-		// дробная ширина панели ломает раскладку колонок epub.js — последняя
-		// страница главы «проглатывается»; держим чётные целые размеры
+		// переразметка — только при реальном изменении ширины (поворот,
+		// перетаскивание панели): на планшете высота дёргается из-за клавиатуры
+		// и системных панелей, и реакция на неё превращалась в «мигание»
+		let lastW = Math.floor(readerEl.clientWidth / 2) * 2;
+		let lastH = Math.floor(readerEl.clientHeight);
 		const applySize = debounce(
 			() => {
+				if (!this.rendition) return;
 				const w = Math.floor(readerEl.clientWidth / 2) * 2;
 				const h = Math.floor(readerEl.clientHeight);
-				if (w > 0 && h > 0 && this.rendition) {
-					try {
-						(this.rendition as any).resize(w, h);
-					} catch (e) {
-						/* noop */
-					}
+				if (w <= 0 || h <= 0) return;
+				const heightMatters = !Platform.isMobile;
+				if (Math.abs(w - lastW) < 2 && (!heightMatters || Math.abs(h - lastH) < 2)) return;
+				lastW = w;
+				lastH = h;
+				const loc = (this.rendition as any)?.currentLocation?.();
+				const cfi = String(loc?.start?.cfi ?? "");
+				try {
+					(this.rendition as any).resize(w, h);
+				} catch (e) {
+					/* noop */
 				}
+				// resize у epub.js может уронить позицию на начало главы — возвращаем
+				if (cfi) window.setTimeout(() => void this.tryDisplay(cfi), 80);
 			},
-			150,
+			300,
 			true
 		);
-		applySize();
 		this.resizeObs?.disconnect();
 		this.resizeObs = new ResizeObserver(() => applySize());
 		this.resizeObs.observe(readerEl);
@@ -1175,8 +1197,9 @@ class TomeView extends FileView {
 		this.hideSelection();
 	}
 
-	// лёгкая анимация перелистывания (уважает prefers-reduced-motion)
+	// лёгкая анимация перелистывания — опция, по умолчанию выключена
 	animateTurn(dir: "prev" | "next") {
+		if (!this.plugin.settings.turnAnimation) return;
 		const el = this.contentEl.querySelector(".tome-reader") as HTMLElement | null;
 		if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 		el.removeClass("tome-turn-next");
@@ -1401,6 +1424,10 @@ class TomeView extends FileView {
 			});
 		};
 
+		// закладки закреплены между поиском и списком глав — всегда на виду
+		this.tocBmWrapEl = panel.createDiv({ cls: "tome-toc-bmwrap" });
+		this.tocBmWrapEl.hide();
+
 		this.tocListEl = panel.createDiv({ cls: "tome-toc-list" });
 	}
 
@@ -1427,12 +1454,15 @@ class TomeView extends FileView {
 		if (!list) return;
 		list.empty();
 		const L = this.plugin.t();
-		// закладки — отдельным блоком над главами
-		const bms = this.getBookmarks();
-		if (bms.length) {
-			list.createDiv({ cls: "tome-toc-item tome-toc-section", text: L.bmSection });
+		// закладки — в закреплённом блоке, не прокручиваются вместе с главами
+		const bmWrap = this.tocBmWrapEl;
+		if (bmWrap) {
+			bmWrap.empty();
+			const bms = this.getBookmarks();
+			bmWrap.toggle(bms.length > 0);
+			bmWrap.createDiv({ cls: "tome-toc-item tome-toc-section", text: L.bmSection });
 			bms.forEach((bm, i) => {
-				const row = list.createDiv({ cls: "tome-toc-item tome-bm-item" });
+				const row = bmWrap.createDiv({ cls: "tome-toc-item tome-bm-item" });
 				row.createSpan({ cls: "tome-bm-label", text: "🔖 " + (bm.label || "—") });
 				const del = row.createEl("button", { cls: "tome-btn tome-bm-del", text: "✕" });
 				del.onclick = (ev) => {
@@ -1446,7 +1476,6 @@ class TomeView extends FileView {
 					void this.tryDisplay(bm.cfi);
 				};
 			});
-			if (this.flatToc.length) list.createDiv({ cls: "tome-toc-item tome-toc-section", text: L.toc });
 		}
 		const loc = (this.rendition as any)?.currentLocation?.();
 		const curHref = String(loc?.start?.href ?? "");
@@ -1847,6 +1876,16 @@ class TomeSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 						this.plugin.applySettingsToOpenViews();
 					})
+			);
+
+		new Setting(containerEl)
+			.setName(L.stTurnAnim)
+			.setDesc(L.stTurnAnimDesc)
+			.addToggle((tg) =>
+				tg.setValue(this.plugin.settings.turnAnimation).onChange(async (v) => {
+					this.plugin.settings.turnAnimation = v;
+					await this.plugin.saveSettings();
+				})
 			);
 
 		new Setting(containerEl)

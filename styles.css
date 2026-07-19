@@ -392,6 +392,14 @@
 }
 
 /* ── закладки в панели оглавления ── */
+.tome-toc-bmwrap {
+	flex: 0 0 auto;
+	max-height: 30%;
+	overflow-y: auto;
+	border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+	padding-bottom: 4px;
+}
+
 .tome-toc-section {
 	opacity: 0.55;
 	font-size: 11px;
